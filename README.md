@@ -97,13 +97,13 @@ PORTING-PLAN.md · IMPLEMENTATION-GUIDE.md · ARCHITECTURE.md · SUBMISSION.md
 
 ## Built with Claude Code
 
-This solution was designed and built using the **Claude Code** coding agent together with the official **UiPath skills catalog**:
+This solution was designed and built using the **Claude Code** coding agent together with the official **UiPath skills catalog** (22 skills installed as the `uipath@uipath-marketplace` Claude Code plugin):
 
 ```bash
-uip skills install --agent claude
+uip skills install --agent claude     # → 22 skills installed; claude plugin list → uipath@uipath-marketplace ✔ enabled
 ```
 
-The coding agent scaffolded the Python LangGraph agent, drafted the API Workflow contracts, and assisted with the Maestro Case model and deployment. A prompt log / session export is included for the AgentHack coding-agent bonus *(to be added)*.
+The coding agent scaffolded the Python LangGraph agent, drafted the API Workflow contracts, and assists with the Maestro Case model and deployment. The full evidence trail — install output, per-session log of what the agent produced, and the screenshots/prompt-log checklist for the AgentHack coding-agent bonus — is in **[docs/BUILT-WITH-CLAUDE-CODE.md](docs/BUILT-WITH-CLAUDE-CODE.md)**.
 
 ---
 
