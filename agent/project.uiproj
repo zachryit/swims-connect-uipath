@@ -1,0 +1,6 @@
+{
+  "ProjectType": "Agent",
+  "Name": "swims-connect-agent",
+  "Description": "SWIMS-Connect intake & case agent (LangGraph + Gemini) \u2014 UiPath coded agent",
+  "MainFile": null
+}
