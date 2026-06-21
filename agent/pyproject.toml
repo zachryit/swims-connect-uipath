@@ -1,0 +1,20 @@
+[project]
+name = "swims-connect-agent"
+version = "0.1.0"
+description = "SWIMS-Connect intake & case agent (LangGraph + Gemini) — UiPath coded agent"
+requires-python = ">=3.11"
+dependencies = [
+    "uipath>=2.0.0",
+    "uipath-langchain",
+    "langgraph",
+    "langchain-google-genai",
+    "requests",
+    "python-dotenv",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+include = ["*.py"]
