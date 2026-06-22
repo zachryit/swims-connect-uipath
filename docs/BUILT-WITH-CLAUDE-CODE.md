@@ -53,8 +53,20 @@ These 22 skills teach Claude Code how to build, validate, and deploy UiPath arti
 | 3 | 2026-06-21 | Built the Python LangGraph + Gemini coded agent (Primero client, concern mapper, tools, prompt, graph) | `agent/*.py`, `langgraph.json`, `pyproject.toml` |
 | 4 | 2026-06-21 | **Verified end-to-end**: NL report → Gemini 3.1 Pro extraction → real SWIMS `case_id_display` created against the live Primero backend | e.g. case `f220ca2` (child labour + educational neglect, Kumasi) |
 | 5 | 2026-06-21 | Installed the UiPath skills catalog into Claude Code (this file) | `uipath@uipath-marketplace` v0.0.36, 22 skills |
+| 6 | 2026-06-22 | Authenticated headlessly with the UiPath External App and published the packaged coded agent to the Orchestrator tenant processes feed | `swims-connect-agent` v0.1.0 — `Package published successfully!` |
 
 *(append in-tenant build sessions here: connector import, API Workflows, agent publish, Maestro Case authoring)*
+
+### Tenant publish proof
+
+```console
+$ uipath publish --tenant
+Publishing most recent package: swims-connect-agent.0.1.0.nupkg ...
+✓  Package published successfully!
+```
+
+Target: organization `testwvroiff`, tenant `DefaultTenant`, Orchestrator Tenant Processes Feed.
+No credentials or access tokens are stored in this evidence log.
 
 ## To finalize before submission (capture as you build)
 
