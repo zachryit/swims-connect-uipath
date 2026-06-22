@@ -23,9 +23,9 @@ cd agent
 python run_local.py "A 12-year-old boy is working in a mine in Tarkwa."
 ```
 Requires `GOOGLE_API_KEY`, `GEMINI_MODEL`, and `PRIMERO_*` in the repo-root `.env`.
-Locally the tools call Primero directly; in the UiPath tenant the same tools invoke
-**API Workflows** (swap the bodies for `sdk.processes.invoke(...)`), keeping the agent
-contract identical. The Gemini key in the tenant comes from an Orchestrator Secret asset.
+Locally the tools call Primero directly. In the UiPath tenant, the agent loads its settings
+from `SWIMS_*` Orchestrator assets in the process folder; API Workflows can later replace the
+direct HTTP bodies without changing the agent contract.
 
 ## Status
 ✅ Verified end-to-end against the live Primero backend: NL report → Gemini extraction →

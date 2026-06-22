@@ -54,6 +54,7 @@ These 22 skills teach Claude Code how to build, validate, and deploy UiPath arti
 | 4 | 2026-06-21 | **Verified end-to-end**: NL report → Gemini 3.1 Pro extraction → real SWIMS `case_id_display` created against the live Primero backend | e.g. case `f220ca2` (child labour + educational neglect, Kumasi) |
 | 5 | 2026-06-21 | Installed the UiPath skills catalog into Claude Code (this file) | `uipath@uipath-marketplace` v0.0.36, 22 skills |
 | 6 | 2026-06-22 | Authenticated headlessly with the UiPath External App and published the packaged coded agent to the Orchestrator tenant processes feed | `swims-connect-agent` v0.1.0 — `Package published successfully!` |
+| 7 | 2026-06-22 | Added secure Orchestrator asset hydration, published v0.1.1, and provisioned five `SWIMS_*` runtime assets in `Shared` | Package and assets succeeded; process binding is awaiting Agent runtime capacity |
 
 *(append in-tenant build sessions here: connector import, API Workflows, agent publish, Maestro Case authoring)*
 
@@ -67,6 +68,18 @@ Publishing most recent package: swims-connect-agent.0.1.0.nupkg ...
 
 Target: organization `testwvroiff`, tenant `DefaultTenant`, Orchestrator Tenant Processes Feed.
 No credentials or access tokens are stored in this evidence log.
+
+### Tenant runtime diagnostic
+
+The CLI verified the package and assets, but process creation returned:
+
+```text
+Agent runtime capacity is not allocated to the folder
+```
+
+The Community tenant reports `AgentService: 0`, `CaseManagement: 0`, and `Flow: 0` in its
+allowed license capacity. The packaged agent remains deployable; process binding and Maestro
+Case deployment must continue in an AgentHack/Labs tenant with those services enabled.
 
 ## To finalize before submission (capture as you build)
 
