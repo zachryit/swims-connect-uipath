@@ -57,6 +57,7 @@ These 22 skills teach Claude Code how to build, validate, and deploy UiPath arti
 | 7 | 2026-06-22 | Added secure Orchestrator asset hydration, published v0.1.1, and provisioned five `SWIMS_*` runtime assets in `Shared` | Package and assets succeeded; process binding is awaiting Agent runtime capacity |
 | 8 | 2026-06-23 | Switched to the replacement UiPath account and repeated the tenant deployment | v0.1.1 and five `SWIMS_*` assets verified in `swims / DefaultTenant`; Agent runtime capacity is still unavailable |
 | 9 | 2026-06-23 | Deployed to the dedicated hackathon staging tenant | v0.1.1 and five `SWIMS_*` assets verified in `hackathon26_895 / DefaultTenant`; Agent services are enabled, but `Shared` has zero Agent runtime allocation |
+| 10 | 2026-06-23 | Corrected deployment for Unified licensing: generated five asset bindings and deployed with the official coded-agent lifecycle | `uip codedagent deploy --tenant` published `swims-connect-agent` v0.1.2 successfully |
 
 *(append in-tenant build sessions here: connector import, API Workflows, agent publish, Maestro Case authoring)*
 
@@ -79,9 +80,11 @@ The CLI verified the package and assets, but process creation returned:
 Agent runtime capacity is not allocated to the folder
 ```
 
-The Community tenant reports `AgentService: 0`, `CaseManagement: 0`, and `Flow: 0` in its
-allowed license capacity. The packaged agent remains deployable; process binding and Maestro
-Case deployment must continue in an AgentHack/Labs tenant with those services enabled.
+The earlier Community tenant reports `AgentService: 0`, `CaseManagement: 0`, and `Flow: 0` in
+its legacy allowed-license capacity. The hackathon staging tenant uses Unified licensing:
+Agents consume Agent Units and Maestro consumes Platform Units. A legacy Orchestrator process
+binding is not required for the standalone coded agent; v0.1.2 was deployed successfully with
+`uip codedagent deploy --tenant` and is intended to be invoked from Flow/Maestro.
 
 ## To finalize before submission (capture as you build)
 

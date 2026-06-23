@@ -17,30 +17,42 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 def _hydrate_runtime_settings() -> None:
     """Load tenant runtime settings from Orchestrator without exposing secret values."""
-    assets = {
-        "GOOGLE_API_KEY": ("SWIMS_GOOGLE_API_KEY", True),
-        "GEMINI_MODEL": ("SWIMS_GEMINI_MODEL", False),
-        "PRIMERO_API_BASE_URL": ("SWIMS_PRIMERO_API_BASE_URL", False),
-        "PRIMERO_ANON_USERNAME": ("SWIMS_PRIMERO_ANON_USERNAME", True),
-        "PRIMERO_ANON_PASSWORD": ("SWIMS_PRIMERO_ANON_PASSWORD", True),
-    }
-    missing = {env: spec for env, spec in assets.items() if not os.environ.get(env)}
-    if not missing:
+    required = (
+        "GOOGLE_API_KEY",
+        "GEMINI_MODEL",
+        "PRIMERO_API_BASE_URL",
+        "PRIMERO_ANON_USERNAME",
+        "PRIMERO_ANON_PASSWORD",
+    )
+    if all(os.environ.get(name) for name in required):
         return
 
     from uipath.platform import UiPath
 
     sdk = UiPath()
     folder_path = os.environ.get("UIPATH_FOLDER_PATH", "Shared")
-    for env_name, (asset_name, is_secret) in missing.items():
-        if is_secret:
-            value = sdk.assets.retrieve_secret(asset_name, folder_path=folder_path)
-        else:
-            asset = sdk.assets.retrieve(asset_name, folder_path=folder_path)
-            value = getattr(asset, "value", None)
+
+    values = {
+        "GOOGLE_API_KEY": sdk.assets.retrieve_secret(
+            "SWIMS_GOOGLE_API_KEY", folder_path=folder_path
+        ),
+        "GEMINI_MODEL": sdk.assets.retrieve(
+            "SWIMS_GEMINI_MODEL", folder_path=folder_path
+        ).value,
+        "PRIMERO_API_BASE_URL": sdk.assets.retrieve(
+            "SWIMS_PRIMERO_API_BASE_URL", folder_path=folder_path
+        ).value,
+        "PRIMERO_ANON_USERNAME": sdk.assets.retrieve_secret(
+            "SWIMS_PRIMERO_ANON_USERNAME", folder_path=folder_path
+        ),
+        "PRIMERO_ANON_PASSWORD": sdk.assets.retrieve_secret(
+            "SWIMS_PRIMERO_ANON_PASSWORD", folder_path=folder_path
+        ),
+    }
+    for env_name, value in values.items():
         if not value:
-            raise RuntimeError(f"Required Orchestrator asset is missing or empty: {asset_name}")
-        os.environ[env_name] = str(value)
+            raise RuntimeError(f"Required Orchestrator setting is missing: {env_name}")
+        os.environ.setdefault(env_name, str(value))
 
 
 # This must run before importing tools/primero because primero reads its base URL at import time.

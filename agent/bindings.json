@@ -1,0 +1,55 @@
+{
+  "version": "2.0",
+  "resources": [
+    {
+      "resource": "asset",
+      "key": "SWIMS_GOOGLE_API_KEY.Shared",
+      "value": {
+        "name": {"defaultValue": "SWIMS_GOOGLE_API_KEY", "isExpression": false, "displayName": "Name"},
+        "folderPath": {"defaultValue": "Shared", "isExpression": false, "displayName": "Folder Path"},
+        "EntryPointUniqueId": {"defaultValue": "6ac7b4aa-e141-41cc-9f68-e049bb02b6bc", "isExpression": false, "displayName": "agent"}
+      },
+      "metadata": {"ActivityName": "retrieve_async", "BindingsVersion": "2.2", "DisplayLabel": "FullName", "SubType": "secretAsset"}
+    },
+    {
+      "resource": "asset",
+      "key": "SWIMS_GEMINI_MODEL.Shared",
+      "value": {
+        "name": {"defaultValue": "SWIMS_GEMINI_MODEL", "isExpression": false, "displayName": "Name"},
+        "folderPath": {"defaultValue": "Shared", "isExpression": false, "displayName": "Folder Path"},
+        "EntryPointUniqueId": {"defaultValue": "6ac7b4aa-e141-41cc-9f68-e049bb02b6bc", "isExpression": false, "displayName": "agent"}
+      },
+      "metadata": {"ActivityName": "retrieve_async", "BindingsVersion": "2.2", "DisplayLabel": "FullName", "SubType": "stringAsset"}
+    },
+    {
+      "resource": "asset",
+      "key": "SWIMS_PRIMERO_API_BASE_URL.Shared",
+      "value": {
+        "name": {"defaultValue": "SWIMS_PRIMERO_API_BASE_URL", "isExpression": false, "displayName": "Name"},
+        "folderPath": {"defaultValue": "Shared", "isExpression": false, "displayName": "Folder Path"},
+        "EntryPointUniqueId": {"defaultValue": "6ac7b4aa-e141-41cc-9f68-e049bb02b6bc", "isExpression": false, "displayName": "agent"}
+      },
+      "metadata": {"ActivityName": "retrieve_async", "BindingsVersion": "2.2", "DisplayLabel": "FullName", "SubType": "stringAsset"}
+    },
+    {
+      "resource": "asset",
+      "key": "SWIMS_PRIMERO_ANON_USERNAME.Shared",
+      "value": {
+        "name": {"defaultValue": "SWIMS_PRIMERO_ANON_USERNAME", "isExpression": false, "displayName": "Name"},
+        "folderPath": {"defaultValue": "Shared", "isExpression": false, "displayName": "Folder Path"},
+        "EntryPointUniqueId": {"defaultValue": "6ac7b4aa-e141-41cc-9f68-e049bb02b6bc", "isExpression": false, "displayName": "agent"}
+      },
+      "metadata": {"ActivityName": "retrieve_async", "BindingsVersion": "2.2", "DisplayLabel": "FullName", "SubType": "secretAsset"}
+    },
+    {
+      "resource": "asset",
+      "key": "SWIMS_PRIMERO_ANON_PASSWORD.Shared",
+      "value": {
+        "name": {"defaultValue": "SWIMS_PRIMERO_ANON_PASSWORD", "isExpression": false, "displayName": "Name"},
+        "folderPath": {"defaultValue": "Shared", "isExpression": false, "displayName": "Folder Path"},
+        "EntryPointUniqueId": {"defaultValue": "6ac7b4aa-e141-41cc-9f68-e049bb02b6bc", "isExpression": false, "displayName": "agent"}
+      },
+      "metadata": {"ActivityName": "retrieve_async", "BindingsVersion": "2.2", "DisplayLabel": "FullName", "SubType": "secretAsset"}
+    }
+  ]
+}

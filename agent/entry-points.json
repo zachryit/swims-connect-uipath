@@ -1,0 +1,215 @@
+{
+    "$schema": "https://cloud.uipath.com/draft/2024-12/entry-point",
+    "$id": "entry-points.json",
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "75d6bdb2-6c83-42e1-bf7d-5293ff319acc",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "messages": {
+                        "items": {
+                            "additionalProperties": true,
+                            "description": "Base abstract message class.\n\nMessages are the inputs and outputs of a chat model.\n\nExamples include [`HumanMessage`][langchain.messages.HumanMessage],\n[`AIMessage`][langchain.messages.AIMessage], and\n[`SystemMessage`][langchain.messages.SystemMessage].",
+                            "properties": {
+                                "content": {
+                                    "anyOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "items": {
+                                                "anyOf": [
+                                                    {
+                                                        "type": "string"
+                                                    },
+                                                    {
+                                                        "additionalProperties": true,
+                                                        "type": "object"
+                                                    }
+                                                ]
+                                            },
+                                            "type": "array"
+                                        }
+                                    ],
+                                    "title": "Content"
+                                },
+                                "additional_kwargs": {
+                                    "additionalProperties": true,
+                                    "title": "Additional Kwargs",
+                                    "type": "object"
+                                },
+                                "response_metadata": {
+                                    "additionalProperties": true,
+                                    "title": "Response Metadata",
+                                    "type": "object"
+                                },
+                                "type": {
+                                    "title": "Type",
+                                    "type": "string"
+                                },
+                                "name": {
+                                    "type": "string"
+                                },
+                                "id": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "content",
+                                "type"
+                            ],
+                            "title": "BaseMessage",
+                            "type": "object"
+                        },
+                        "title": "Messages",
+                        "type": "array"
+                    },
+                    "remaining_steps": {
+                        "title": "Remaining Steps",
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "messages"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "messages": {
+                        "items": {
+                            "additionalProperties": true,
+                            "description": "Base abstract message class.\n\nMessages are the inputs and outputs of a chat model.\n\nExamples include [`HumanMessage`][langchain.messages.HumanMessage],\n[`AIMessage`][langchain.messages.AIMessage], and\n[`SystemMessage`][langchain.messages.SystemMessage].",
+                            "properties": {
+                                "content": {
+                                    "anyOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "items": {
+                                                "anyOf": [
+                                                    {
+                                                        "type": "string"
+                                                    },
+                                                    {
+                                                        "additionalProperties": true,
+                                                        "type": "object"
+                                                    }
+                                                ]
+                                            },
+                                            "type": "array"
+                                        }
+                                    ],
+                                    "title": "Content"
+                                },
+                                "additional_kwargs": {
+                                    "additionalProperties": true,
+                                    "title": "Additional Kwargs",
+                                    "type": "object"
+                                },
+                                "response_metadata": {
+                                    "additionalProperties": true,
+                                    "title": "Response Metadata",
+                                    "type": "object"
+                                },
+                                "type": {
+                                    "title": "Type",
+                                    "type": "string"
+                                },
+                                "name": {
+                                    "type": "string"
+                                },
+                                "id": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "content",
+                                "type"
+                            ],
+                            "title": "BaseMessage",
+                            "type": "object"
+                        },
+                        "title": "Messages",
+                        "type": "array"
+                    },
+                    "remaining_steps": {
+                        "title": "Remaining Steps",
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "messages"
+                ]
+            },
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "__start__",
+                        "name": "__start__",
+                        "type": "__start__",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "agent",
+                        "name": "agent",
+                        "type": "model",
+                        "subgraph": null,
+                        "metadata": {
+                            "model_name": "gemini-3.1-pro-preview",
+                            "temperature": 0.0
+                        }
+                    },
+                    {
+                        "id": "tools",
+                        "name": "tools",
+                        "type": "tool",
+                        "subgraph": null,
+                        "metadata": {
+                            "tool_names": [
+                                "create_case",
+                                "get_case",
+                                "list_cases"
+                            ],
+                            "tool_count": 3
+                        }
+                    },
+                    {
+                        "id": "__end__",
+                        "name": "__end__",
+                        "type": "__end__",
+                        "subgraph": null,
+                        "metadata": {}
+                    }
+                ],
+                "edges": [
+                    {
+                        "source": "__start__",
+                        "target": "agent",
+                        "label": null
+                    },
+                    {
+                        "source": "agent",
+                        "target": "__end__",
+                        "label": null
+                    },
+                    {
+                        "source": "agent",
+                        "target": "tools",
+                        "label": null
+                    },
+                    {
+                        "source": "tools",
+                        "target": "agent",
+                        "label": null
+                    }
+                ]
+            }
+        }
+    ]
+}
