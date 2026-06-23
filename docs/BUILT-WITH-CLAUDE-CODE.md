@@ -55,6 +55,7 @@ These 22 skills teach Claude Code how to build, validate, and deploy UiPath arti
 | 5 | 2026-06-21 | Installed the UiPath skills catalog into Claude Code (this file) | `uipath@uipath-marketplace` v0.0.36, 22 skills |
 | 6 | 2026-06-22 | Authenticated headlessly with the UiPath External App and published the packaged coded agent to the Orchestrator tenant processes feed | `swims-connect-agent` v0.1.0 — `Package published successfully!` |
 | 7 | 2026-06-22 | Added secure Orchestrator asset hydration, published v0.1.1, and provisioned five `SWIMS_*` runtime assets in `Shared` | Package and assets succeeded; process binding is awaiting Agent runtime capacity |
+| 8 | 2026-06-23 | Switched to the replacement UiPath account and repeated the tenant deployment | v0.1.1 and five `SWIMS_*` assets verified in `swims / DefaultTenant`; Agent runtime capacity is still unavailable |
 
 *(append in-tenant build sessions here: connector import, API Workflows, agent publish, Maestro Case authoring)*
 
