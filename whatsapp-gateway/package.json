@@ -1,0 +1,19 @@
+{
+  "name": "swims-connect-whatsapp-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Transport-only Baileys adapter between WhatsApp and the UiPath SWIMS conversation API trigger.",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "baileys": "7.0.0-rc13",
+    "pino": "^9.6.0",
+    "qrcode": "^1.5.4"
+  }
+}

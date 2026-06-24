@@ -1,0 +1,391 @@
+{
+  "id": "61b138db-f76a-4de3-bfc4-b4561ce7558f",
+  "version": "1.3",
+  "name": "WhatsAppConversation",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "core.trigger.manual",
+      "typeVersion": "1.0",
+      "display": {
+        "label": "Manual trigger"
+      },
+      "inputs": {
+        "entryPointId": "caf4fcec-d9dc-4f43-8cda-32624f57be6f",
+        "isDefaultEntryPoint": true
+      }
+    },
+    {
+      "id": "loadSenderConversationState1",
+      "type": "core.logic.mock",
+      "typeVersion": "1.0",
+      "display": {
+        "label": "Load sender conversation state"
+      },
+      "inputs": {}
+    },
+    {
+      "id": "invokeSwimsConnectAgentAttachDeployedResource1",
+      "type": "core.logic.mock",
+      "typeVersion": "1.0",
+      "display": {
+        "label": "Invoke swims-connect-agent (attach deployed resource)"
+      },
+      "inputs": {}
+    },
+    {
+      "id": "startMaestroCaseWhenSwimscaseidExists1",
+      "type": "core.logic.mock",
+      "typeVersion": "1.0",
+      "display": {
+        "label": "Start Maestro case when swimsCaseId exists"
+      },
+      "inputs": {}
+    },
+    {
+      "id": "returnWhatsappReply1",
+      "type": "core.control.end",
+      "typeVersion": "1.0",
+      "display": {
+        "label": "Return WhatsApp reply"
+      },
+      "inputs": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "start-output-loadSenderConversationState1-input",
+      "sourceNodeId": "start",
+      "sourcePort": "output",
+      "targetNodeId": "loadSenderConversationState1",
+      "targetPort": "input"
+    },
+    {
+      "id": "loadSenderConversationState1-output-invokeSwimsConnectAgentAttachDeployedResource1-input",
+      "sourceNodeId": "loadSenderConversationState1",
+      "sourcePort": "output",
+      "targetNodeId": "invokeSwimsConnectAgentAttachDeployedResource1",
+      "targetPort": "input"
+    },
+    {
+      "id": "invokeSwimsConnectAgentAttachDeployedResource1-output-startMaestroCaseWhenSwimscaseidExists1-input",
+      "sourceNodeId": "invokeSwimsConnectAgentAttachDeployedResource1",
+      "sourcePort": "output",
+      "targetNodeId": "startMaestroCaseWhenSwimscaseidExists1",
+      "targetPort": "input"
+    },
+    {
+      "id": "startMaestroCaseWhenSwimscaseidExists1-output-returnWhatsappReply1-input",
+      "sourceNodeId": "startMaestroCaseWhenSwimscaseidExists1",
+      "sourcePort": "output",
+      "targetNodeId": "returnWhatsappReply1",
+      "targetPort": "input"
+    }
+  ],
+  "definitions": [
+    {
+      "nodeType": "core.trigger.manual",
+      "version": "1.0",
+      "category": "trigger",
+      "description": "Start workflow manually",
+      "tags": [
+        "trigger",
+        "start",
+        "manual"
+      ],
+      "sortOrder": 40,
+      "display": {
+        "label": "Manual trigger",
+        "icon": "play",
+        "shape": "circle"
+      },
+      "handleConfiguration": [
+        {
+          "position": "right",
+          "handles": [
+            {
+              "id": "output",
+              "type": "source",
+              "handleType": "output",
+              "showButton": true,
+              "constraints": {
+                "forbiddenTargetCategories": [
+                  "trigger"
+                ]
+              }
+            }
+          ],
+          "visible": true
+        }
+      ],
+      "model": {
+        "type": "bpmn:StartEvent",
+        "entryPointId": true
+      },
+      "outputDefinition": {
+        "output": {
+          "type": "object",
+          "description": "Data passed when manually triggering the workflow.",
+          "source": "null",
+          "var": "output"
+        }
+      },
+      "toolbarExtensions": {
+        "design": {
+          "actions": [
+            {
+              "id": "change-trigger-type",
+              "icon": "square-mouse-pointer",
+              "label": "Change trigger type"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "nodeType": "core.logic.mock",
+      "version": "1.0",
+      "category": "control-flow",
+      "description": "Placeholder node for prototyping",
+      "tags": [
+        "blank",
+        "todo"
+      ],
+      "sortOrder": 20,
+      "display": {
+        "label": "Mock",
+        "icon": "square-dashed"
+      },
+      "handleConfiguration": [
+        {
+          "position": "left",
+          "handles": [
+            {
+              "id": "input",
+              "type": "target",
+              "handleType": "input"
+            }
+          ],
+          "visible": true
+        },
+        {
+          "position": "right",
+          "handles": [
+            {
+              "id": "output",
+              "type": "source",
+              "handleType": "output"
+            }
+          ],
+          "visible": true
+        }
+      ],
+      "model": {
+        "type": "bpmn:Task"
+      },
+      "outputDefinition": {
+        "output": {
+          "type": "object",
+          "description": "Mock output value",
+          "source": "null",
+          "var": "output"
+        }
+      },
+      "runtimeConstraints": {
+        "exclude": [
+          "api-function"
+        ]
+      }
+    },
+    {
+      "nodeType": "core.control.end",
+      "version": "1.0",
+      "category": "control-flow",
+      "description": "Mark the end of a workflow path",
+      "tags": [
+        "control-flow",
+        "end",
+        "finish",
+        "complete"
+      ],
+      "sortOrder": 20,
+      "display": {
+        "label": "End",
+        "icon": "circle-check",
+        "shape": "circle"
+      },
+      "handleConfiguration": [
+        {
+          "position": "left",
+          "handles": [
+            {
+              "id": "input",
+              "type": "target",
+              "handleType": "input"
+            }
+          ]
+        }
+      ],
+      "model": {
+        "type": "bpmn:EndEvent"
+      },
+      "runtimeConstraints": {
+        "exclude": [
+          "api-function"
+        ]
+      }
+    }
+  ],
+  "runtime": "maestro",
+  "variables": {
+    "globals": [
+      {
+        "id": "channel",
+        "direction": "in",
+        "type": "string"
+      },
+      {
+        "id": "sender",
+        "direction": "in",
+        "type": "string"
+      },
+      {
+        "id": "messageId",
+        "direction": "in",
+        "type": "string"
+      },
+      {
+        "id": "text",
+        "direction": "in",
+        "type": "string"
+      },
+      {
+        "id": "messageType",
+        "direction": "in",
+        "type": "string"
+      },
+      {
+        "id": "receivedAt",
+        "direction": "in",
+        "type": "string"
+      },
+      {
+        "id": "reply",
+        "direction": "out",
+        "type": "string"
+      },
+      {
+        "id": "conversationId",
+        "direction": "out",
+        "type": "string"
+      },
+      {
+        "id": "swimsCaseId",
+        "direction": "out",
+        "type": "string"
+      },
+      {
+        "id": "riskLevel",
+        "direction": "out",
+        "type": "string"
+      },
+      {
+        "id": "caseStarted",
+        "direction": "out",
+        "type": "boolean"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "start.output",
+        "type": "object",
+        "description": "Data passed when manually triggering the workflow.",
+        "binding": {
+          "nodeId": "start",
+          "outputId": "output"
+        }
+      },
+      {
+        "id": "loadSenderConversationState1.output",
+        "type": "object",
+        "description": "Mock output value",
+        "binding": {
+          "nodeId": "loadSenderConversationState1",
+          "outputId": "output"
+        }
+      },
+      {
+        "id": "invokeSwimsConnectAgentAttachDeployedResource1.output",
+        "type": "object",
+        "description": "Mock output value",
+        "binding": {
+          "nodeId": "invokeSwimsConnectAgentAttachDeployedResource1",
+          "outputId": "output"
+        }
+      },
+      {
+        "id": "startMaestroCaseWhenSwimscaseidExists1.output",
+        "type": "object",
+        "description": "Mock output value",
+        "binding": {
+          "nodeId": "startMaestroCaseWhenSwimscaseidExists1",
+          "outputId": "output"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "nodes": {
+      "start": {
+        "position": {
+          "x": 256,
+          "y": 144
+        },
+        "size": {
+          "width": 96,
+          "height": 96
+        }
+      },
+      "loadSenderConversationState1": {
+        "position": {
+          "x": 448,
+          "y": 144
+        },
+        "size": {
+          "width": 96,
+          "height": 96
+        }
+      },
+      "invokeSwimsConnectAgentAttachDeployedResource1": {
+        "position": {
+          "x": 640,
+          "y": 144
+        },
+        "size": {
+          "width": 96,
+          "height": 96
+        }
+      },
+      "startMaestroCaseWhenSwimscaseidExists1": {
+        "position": {
+          "x": 832,
+          "y": 144
+        },
+        "size": {
+          "width": 96,
+          "height": 96
+        }
+      },
+      "returnWhatsappReply1": {
+        "position": {
+          "x": 1024,
+          "y": 144
+        },
+        "size": {
+          "width": 96,
+          "height": 96
+        }
+      }
+    }
+  }
+}

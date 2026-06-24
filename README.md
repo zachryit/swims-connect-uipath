@@ -11,7 +11,7 @@ SWIMS-Connect lets community members file (optionally anonymous) child-protectio
 
 ## What it does
 
-- **Conversational / voice intake** → a **Python LangGraph agent** running **Google Gemini 3.1 Pro** extracts structured case fields from a free-text or voice-note report and opens a real Primero case (with a real Case ID — never fabricated).
+- **Live WhatsApp intake** → people message **+233256590242** through the repository's transport-only Baileys adapter; an authenticated UiPath API trigger invokes the **Python LangGraph agent** running **Google Gemini 3.1 Pro**. The agent gathers a complete report and opens a real Primero case (with a real Case ID — never fabricated).
 - **Orchestrated case lifecycle** → **UiPath Maestro Case** moves each case through its stages with handoffs between the AI agent, API workflows (robotic integration), and human workers, with SLAs, exit criteria, and rework loops for the exceptions that can't be pre-defined.
 - **Humans in charge** → confirm-before-write and **manager-only case closure** are enforced as **UiPath Action Center** approval tasks, not prompt rules.
 - **Governed** → all LLM traffic and agent actions run under the **UiPath AI Trust Layer** (PII masking, guardrails, audit) with full **agent traces** (tokens, latency, decisions) for compliance.
@@ -27,8 +27,8 @@ See **[ARCHITECTURE.md](ARCHITECTURE.md)** for the full diagram.
 |---|---|
 | **UiPath Maestro — Case Management** | Orchestrates the case lifecycle (stages, handoffs, SLAs, exit criteria, rework loops); case/stage-manager agents route work at runtime |
 | **Coded agent (Python, LangGraph)** | Conversational intake + field extraction + voice ASR / image captioning; model = **Google Gemini 3.1 Pro** (bring-your-own-key) |
-| **API Workflows** (Studio Web) | Deterministic, governed reads/writes to the Primero backend (case create/get/list, assessment, case plan, services, follow-up, closure) |
-| **Integration Service connector** | Primero REST connector generated from its OpenAPI spec; centralizes auth |
+| **Maestro Flow + API Workflows** | `WhatsAppConversation` receives API-triggered turns and invokes the agent; API Workflows perform governed Primero reads/writes |
+| **Baileys channel adapter** | Transport-only link for WhatsApp number +233256590242; all reasoning and orchestration remain in UiPath |
 | **UiPath Action Center + Action App** | Human-in-the-loop: worker confirm/edit, manager closure approval |
 | **AI Trust Layer** | LLM guardrails, PII masking, prompt/response audit, token-usage tracking |
 | **UiPath Orchestrator** | Folders, Credential/Secret assets (Gemini key, Primero creds), jobs, time triggers (scheduled reports), agent traces |
@@ -43,7 +43,7 @@ See **[ARCHITECTURE.md](ARCHITECTURE.md)** for the full diagram.
 
 - A **UiPath Automation Cloud** tenant with Maestro, Agents, Action Center, and Integration Service (the AgentHack **UiPath Labs** tenant; request early — provisioning takes 3–5 business days).
 - **Python 3.11–3.13** (coded agents do not support 3.10).
-- **Node.js 18+** (for the `uip` CLI).
+- **Node.js 22+** (UiPath CLI and Baileys gateway).
 - A **Google API key** for `gemini-3.1-pro-preview` (+ `gemini-2.5-flash` fallback).
 - A reachable **Primero/SWIMS** backend (`/api/v2`) + its service-account credentials and OpenAPI/Swagger spec. (We reuse the existing live instance.)
 
@@ -74,6 +74,12 @@ uipath run agent '{"message":"A 12-year-old boy is working in a mine in Tarkwa"}
 # 5. Deploy (when the tenant is ready)
 uipath pack && uipath publish         # coded agent -> Orchestrator
 # then author the Maestro Case + API Workflows in Studio Web (see IMPLEMENTATION-GUIDE.md §4)
+
+# 6. Prepare the WhatsApp adapter after the UiPath API trigger exists
+cd ../whatsapp-gateway
+npm install
+cp .env.example .env                  # set UiPath OAuth + API-trigger endpoint
+npm start                             # scan state/wa-qr.png from +233256590242
 ```
 
 Full step-by-step (tenant setup, connector import, Maestro Case authoring, Action App, governance): **[IMPLEMENTATION-GUIDE.md](IMPLEMENTATION-GUIDE.md)**.
@@ -84,12 +90,14 @@ Full step-by-step (tenant setup, connector import, Maestro Case authoring, Actio
 
 ```
 agent/          Python LangGraph coded agent (Gemini): graph, prompts, tools, ported Primero helpers
+whatsapp-gateway/ Transport-only Baileys adapter for +233256590242 → UiPath API trigger
+SWIMSChildProtectionCase/ UiPath solution and Maestro Case project
 api-workflows/  API Workflow definitions (one per Primero operation)
 connector/      Primero Integration Service connector (OpenAPI spec + config)
 maestro/        Maestro Case model export (stages, tasks, criteria)
 action-app/     Action Center / Action App definitions (HITL)
 reports/        Ported scheduled-report templates
-docs/           SOURCE-INVENTORY.md (source system) · UIPATH-REFERENCE.md (cited platform research)
+docs/           Architecture, source inventory, UiPath research, and coding-agent evidence
 PORTING-PLAN.md · IMPLEMENTATION-GUIDE.md · ARCHITECTURE.md · SUBMISSION.md
 ```
 

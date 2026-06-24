@@ -1,0 +1,17 @@
+{
+  "DocVersion": "1.0.0",
+  "StudioMinVersion": "2025.10.0",
+  "SolutionId": "da01cd30-2c57-4ce6-ad5b-12431b9456c2",
+  "Projects": [
+    {
+      "Type": "CaseManagement",
+      "ProjectRelativePath": "SWIMSChildProtectionCase/project.uiproj",
+      "Id": "7a492479-a7f1-418c-b999-638be5c52807"
+    },
+    {
+      "Type": "Flow",
+      "ProjectRelativePath": "WhatsAppConversation/project.uiproj",
+      "Id": "bc56f18f-d59c-4a18-8783-bc38281836f0"
+    }
+  ]
+}

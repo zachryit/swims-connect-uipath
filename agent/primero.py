@@ -129,6 +129,12 @@ def build_case_data(report: dict) -> dict:
             pass
     if report.get("child_sex"):
         data["sex"] = report["child_sex"]
+    # Route ownership to a case worker so they can act on the case (Primero access is
+    # owner-based). Anonymous WhatsApp reports are owned by a district social worker —
+    # mirrors swims_connect.rb's owner_for_swims_case. Explicit owned_by > env default.
+    owner = report.get("owned_by") or os.environ.get("PRIMERO_DEFAULT_OWNER")
+    if owner:
+        data["owned_by"] = owner
     return data
 
 
@@ -141,7 +147,11 @@ class PrimeroClient:
         self._user: dict | None = None
 
     def _csrf(self) -> str | None:
-        raw = self.s.cookies.get("CSRF-TOKEN")
+        # Tolerate duplicate CSRF-TOKEN cookies (injected + server-refreshed); take the latest.
+        raw = None
+        for ck in self.s.cookies:
+            if ck.name == "CSRF-TOKEN":
+                raw = ck.value
         return unquote(raw) if raw else None
 
     def login(self, username: str, password: str) -> dict:
@@ -202,9 +212,204 @@ class PrimeroClient:
         r.raise_for_status()
         return r.json().get("data", [])
 
+    # ── lifecycle write operations (faithful port of .swimsbot/workspace/scripts/swims-*.js) ──
+    @staticmethod
+    def _norm(v) -> str:
+        return str(v if v is not None else "").strip().lower()
+
+    def _patch(self, case_id: str, data: dict, record_action: str | None = None) -> requests.Response:
+        body: dict = {"data": data}
+        if record_action:
+            body["record_action"] = record_action
+        return self.request("PATCH", f"/cases/{case_id}", json=body)
+
+    @staticmethod
+    def _ok(r: requests.Response, op: str) -> dict:
+        if r.status_code in (200, 201):
+            return r.json().get("data", {})
+        if r.status_code == 403:
+            raise PermissionError(f"{op}: NOT_AUTHORIZED (HTTP 403)")
+        body = r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text
+        raise RuntimeError(f"{op} failed (HTTP {r.status_code}): {body}")
+
+    def record_assessment(self, case_id: str, *, assessment_date: str, case_plan_due: str,
+                          requested_by: str | None = None, threats: str | None = None,
+                          capacities: str | None = None, category: str | None = None,
+                          decision: str | None = None) -> dict:
+        """Port of swims-case-assess.js (+ swims-assessment-fill.js): advance the case to
+        the 'assessment' stage and record the safety-assessment content in one PATCH."""
+        data = {"assessment_requested_on": assessment_date, "workflow": "assessment",
+                "case_plan_due_date": case_plan_due}
+        if requested_by: data["assessment_requested_by"] = requested_by
+        if threats: data["assessment_safety_threats_present"] = threats
+        if capacities: data["assessment_safety_protective_capacities"] = capacities
+        if category: data["assessment_safety_category"] = category
+        if decision: data["assessment_safety_category_decision"] = decision
+        d = self._ok(self._patch(case_id, data), "record_assessment")
+        return {"ok": True, "workflow": d.get("workflow"), "assessment_date": d.get("assessment_requested_on")}
+
+    def add_intervention(self, case_id: str, *, service: str, goal: str | None = None,
+                         provider: str | None = None, due: str | None = None) -> dict:
+        """Port of swims-caseplan-intervention.js: append one case-plan intervention
+        (GET + dedup by service name, since subform appends are non-idempotent)."""
+        current = self.get_case(case_id).get("cp_case_plan_subform_case_plan_interventions") or []
+        if any(self._norm(it.get("intervention_service_to_be_provided")) == self._norm(service) for it in current):
+            return {"ok": True, "skipped": True, "intervention": service}
+        entry = {"intervention_service_to_be_provided": service}
+        if goal: entry["intervention_service_goal"] = goal
+        if provider: entry["case_plan_provider_and_contact_details"] = provider
+        if due: entry["case_plan_timeframe"] = due
+        self._ok(self._patch(case_id, {"cp_case_plan_subform_case_plan_interventions": [entry]}), "add_intervention")
+        return {"ok": True, "intervention": service}
+
+    def record_case_plan(self, case_id: str, *, date: str, goal: str | None = None,
+                         goal_due: str | None = None, review_date: str | None = None,
+                         interventions: list[dict] | None = None) -> dict:
+        """Port of swims-caseplan-record.js: set date_case_plan (workflow trigger) → 'case_plan'
+        stage, then append any interventions."""
+        data = {"date_case_plan": date, "workflow": "case_plan"}
+        if goal: data["case_plan_goal"] = goal
+        if goal_due: data["case_plan_goal_due_date"] = goal_due
+        if review_date: data["case_plan_target_review_date"] = review_date
+        d = self._ok(self._patch(case_id, data), "record_case_plan")
+        added = [self.add_intervention(case_id, **iv) for iv in (interventions or [])]
+        return {"ok": True, "workflow": d.get("workflow"), "interventions": added}
+
+    def add_service_referral(self, case_id: str, *, service_type: str, timeframe: str,
+                             appointment: str | None = None, response_type: str = "service_provision",
+                             notes: str | None = None, provider: str | None = None) -> dict:
+        """Port of swims-service-add.js: append a not-implemented service → 'service_provision'."""
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        tf = {"1_hour": timedelta(hours=1), "3_hours": timedelta(hours=3),
+              "1_day": timedelta(days=1), "3_days": timedelta(days=3)}.get(timeframe, timedelta(days=1))
+        entry = {"service_type": service_type, "service_implemented": "not_implemented",
+                 "service_response_type": response_type, "service_response_day_time": now.isoformat(),
+                 "service_response_timeframe": timeframe,
+                 "service_appointment_date": appointment or (now + tf).date().isoformat()}
+        if notes: entry["service_referral_notes"] = notes
+        if provider: entry["service_provider"] = provider
+        current = self.get_case(case_id).get("services_section") or []
+        keys = [k for k in entry if entry[k] not in (None, "")]
+        if any(all(self._norm(it.get(k)) == self._norm(entry[k]) for k in keys) for it in current):
+            return {"ok": True, "skipped": True, "service": service_type}
+        d = self._ok(self._patch(case_id, {"workflow": "service_provision", "services_section": [entry]}), "add_service_referral")
+        return {"ok": True, "workflow": d.get("workflow"), "service": service_type}
+
+    def mark_service_delivered(self, case_id: str, *, date: str, service_id: str | None = None,
+                              service_type: str | None = None) -> dict:
+        """Port of swims-service-implement.js: echo the target service back WITH its unique_id,
+        set implemented + day-time; if it's the last, advance to 'services_implemented'."""
+        services = self.get_case(case_id).get("services_section") or []
+        impl = lambda s: self._norm(s.get("service_implemented")) == "implemented"
+        if service_id:
+            target = next((s for s in services if s.get("unique_id") == service_id), None)
+        elif service_type:
+            target = (next((s for s in services if s.get("service_type") == service_type and not impl(s)), None)
+                      or next((s for s in services if s.get("service_type") == service_type), None))
+        else:
+            raise RuntimeError("mark_service_delivered needs service_id or service_type")
+        if not target:
+            raise RuntimeError("SERVICE_NOT_FOUND")
+        if impl(target):
+            return {"ok": True, "already_implemented": True}
+        updated = {**target, "service_implemented": "implemented",
+                   "service_implemented_day_time": f"{date}T12:00:00.000Z"}
+        last = not [s for s in services if not impl(s) and s.get("unique_id") != target.get("unique_id")]
+        data = {"services_section": [updated]}
+        if last:
+            data["workflow"] = "services_implemented"
+        d = self._ok(self._patch(case_id, data), "mark_service_delivered")
+        after = d.get("services_section") or []
+        return {"ok": True, "workflow": d.get("workflow"), "service": target.get("service_type"),
+                "all_implemented": bool(after) and all(impl(s) for s in after)}
+
+    def record_followup(self, case_id: str, *, needed_by: str | None = None, date: str | None = None,
+                       followup_type: str | None = None, service_type: str | None = None,
+                       comments: str | None = None) -> dict:
+        """Port of swims-case-followup.js: append a follow-up row (GET + dedup)."""
+        entry = {}
+        if followup_type: entry["followup_type"] = followup_type
+        if service_type: entry["followup_service_type"] = service_type
+        if needed_by: entry["followup_needed_by_date"] = needed_by
+        if date: entry["followup_date"] = date
+        if comments: entry["followup_comments"] = comments
+        if not entry:
+            raise RuntimeError("record_followup needs at least one field")
+        current = self.get_case(case_id).get("followup_subform_section") or []
+        keys = [k for k in entry if entry[k] not in (None, "")]
+        if keys and any(all(self._norm(it.get(k)) == self._norm(entry[k]) for k in keys) for it in current):
+            return {"ok": True, "skipped": True}
+        d = self._ok(self._patch(case_id, {"followup_subform_section": [entry]}), "record_followup")
+        return {"ok": True, "followup_count": len(d.get("followup_subform_section") or [])}
+
+    def close_case(self, case_id: str, *, reason: str | None = None, notes: str | None = None) -> dict:
+        """Port of swims-case-close.js + swims-case-request-closure-approval.js: try to close;
+        on 403 (worker lacks CLOSE) fall back to requesting manager approval."""
+        data = {"status": "closed"}
+        if reason: data["closure_reason"] = reason
+        r = self._patch(case_id, data, record_action="close")
+        if r.status_code in (200, 201):
+            d = r.json().get("data", {})
+            return {"ok": True, "closed": True, "status": d.get("status", "closed"),
+                    "date_closure": d.get("date_closure")}
+        if r.status_code == 403:
+            payload = {"approval_status": "requested"}
+            if notes or reason:
+                payload["notes"] = notes or reason
+            ar = self.request("PATCH", f"/cases/{case_id}/approvals/closure", json={"data": payload})
+            if ar.status_code not in (200, 201):
+                raise RuntimeError(f"request_closure_approval failed (HTTP {ar.status_code}): {ar.text[:300]}")
+            return {"ok": True, "closed": False, "approval_requested": True,
+                    "message": "Closure requires manager approval; approval requested."}
+        raise RuntimeError(f"close_case failed (HTTP {r.status_code}): {r.text[:300]}")
+
 
 def anon_client() -> PrimeroClient:
     """A client logged in as the anonymous-reporter service account (from env)."""
     c = PrimeroClient()
     c.login(os.environ.get("PRIMERO_ANON_USERNAME", ""), os.environ.get("PRIMERO_ANON_PASSWORD", ""))
+    return c
+
+
+def _client_from_env(user_var: str, pass_var: str) -> PrimeroClient | None:
+    """Log in with credentials from env vars (in the tenant: Orchestrator credential assets).
+    Returns None if either var is unset, so callers can fall back to the anon account in dev."""
+    u = os.environ.get(user_var, "").strip()
+    p = os.environ.get(pass_var, "").strip()
+    if not (u and p):
+        return None
+    c = PrimeroClient()
+    c.login(u, p)
+    return c
+
+
+def worker_client() -> PrimeroClient:
+    """A CP Worker session (PRIMERO_WORKER_USERNAME/PASSWORD), used for worker lifecycle
+    actions. Falls back to the anon account when worker creds are unset (local dev)."""
+    return _client_from_env("PRIMERO_WORKER_USERNAME", "PRIMERO_WORKER_PASSWORD") or anon_client()
+
+
+def manager_client() -> PrimeroClient:
+    """A CP Manager session (PRIMERO_MANAGER_USERNAME/PASSWORD), used to approve+close cases.
+    Falls back to the anon account when manager creds are unset (local dev)."""
+    return _client_from_env("PRIMERO_MANAGER_USERNAME", "PRIMERO_MANAGER_PASSWORD") or anon_client()
+
+
+def client_from_session(cookie: str, csrf: str) -> PrimeroClient:
+    """Build a client from an already-logged-in user's session (their `_app_session` cookie
+    string + decoded CSRF token), skipping login. This is how the agent acts AS the logged-in
+    WhatsApp user — their real Primero role is what governs the request. Sessions are minted by
+    the worker login link (the .swimsbot session-store model), keyed per sender; the gateway
+    passes the acting user's {cookie, csrf} into the agent invocation."""
+    c = PrimeroClient()
+    host = __import__("urllib.parse", fromlist=["urlparse"]).urlparse(c.base).hostname
+    for part in (cookie or "").split(";"):
+        name, _, value = part.strip().partition("=")
+        if name and value:
+            c.s.cookies.set(name, value, domain=host)
+    if csrf:
+        # request() reads CSRF-TOKEN via _csrf()=unquote(raw) for the X-CSRF-Token header.
+        # Domain-scope it so a server-refreshed CSRF-TOKEN updates (not duplicates) this entry.
+        c.s.cookies.set("CSRF-TOKEN", csrf, domain=host)
     return c

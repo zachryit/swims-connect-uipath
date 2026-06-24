@@ -1,0 +1,37 @@
+{
+  "generatedAt": "2026-06-23T00:00:00Z",
+  "registryPull": {
+    "status": "partial",
+    "result": "0 nodes; user-scoped registry endpoints returned 401 for the External App"
+  },
+  "resolutions": [
+    {
+      "task": "Validate Intake Report",
+      "type": "agent",
+      "query": "swims connect agent",
+      "matches": [{"name": "swims-connect-agent", "version": "0.1.2", "folder": "Shared"}],
+      "selected": {"name": "swims-connect-agent", "version": "0.1.2", "folder": "Shared"},
+      "rationale": "Published Agent package verified directly in the tenant feed.",
+      "contract": {"inputs": [{"name": "messages", "required": true}], "outputs": ["messages", "remaining_steps"]}
+    },
+    {"task": "Review Worker Intake", "type": "action", "query": "SWIMS Worker Review", "matches": [], "selected": null, "rationale": "No deployed Action App was discoverable.", "contract": null},
+    {"task": "Review Assessment", "type": "action", "query": "SWIMS Worker Review", "matches": [], "selected": null, "rationale": "No deployed Action App was discoverable.", "contract": null},
+    {"task": "Record Assessment", "type": "api-workflow", "query": "SWIMSAssessment", "matches": [], "selected": null, "rationale": "API Workflow is not deployed yet.", "contract": null},
+    {"task": "Review Case Plan", "type": "action", "query": "SWIMS Worker Review", "matches": [], "selected": null, "rationale": "No deployed Action App was discoverable.", "contract": null},
+    {"task": "Record Case Plan", "type": "api-workflow", "query": "SWIMSCasePlan", "matches": [], "selected": null, "rationale": "API Workflow is not deployed yet.", "contract": null},
+    {"task": "Review Service Referral", "type": "action", "query": "SWIMS Worker Review", "matches": [], "selected": null, "rationale": "No deployed Action App was discoverable.", "contract": null},
+    {"task": "Add Service Referral", "type": "api-workflow", "query": "SWIMSServiceReferral", "matches": [], "selected": null, "rationale": "API Workflow is not deployed yet.", "contract": null},
+    {"task": "Confirm Service Delivery", "type": "action", "query": "SWIMS Worker Review", "matches": [], "selected": null, "rationale": "No deployed Action App was discoverable.", "contract": null},
+    {"task": "Mark Service Delivered", "type": "api-workflow", "query": "SWIMSServiceDelivery", "matches": [], "selected": null, "rationale": "API Workflow is not deployed yet.", "contract": null},
+    {"task": "Review Follow-up", "type": "action", "query": "SWIMS Worker Review", "matches": [], "selected": null, "rationale": "No deployed Action App was discoverable.", "contract": null},
+    {"task": "Record Follow-up", "type": "api-workflow", "query": "SWIMSFollowup", "matches": [], "selected": null, "rationale": "API Workflow is not deployed yet.", "contract": null},
+    {"task": "Manager Closure Approval", "type": "action", "query": "SWIMS Manager Approval", "matches": [], "selected": null, "rationale": "No deployed Action App was discoverable.", "contract": null},
+    {"task": "Close SWIMS Case", "type": "api-workflow", "query": "SWIMSClosure", "matches": [], "selected": null, "rationale": "API Workflow is not deployed yet.", "contract": null}
+  ],
+  "review_items": [
+    {"id": "rev_action_apps", "severity": "high", "target": "All action tasks", "message": "Deploy worker-review and manager-approval Action Apps, then resolve their IDs and schemas."},
+    {"id": "rev_api_workflows", "severity": "high", "target": "Lifecycle write tasks", "message": "Build and deploy the six SWIMS lifecycle API Workflows before runtime execution."},
+    {"id": "rev_whatsapp_trigger", "severity": "high", "target": "WhatsApp trigger", "message": "Resolve a deployed WhatsApp Integration Service connection and event type."},
+    {"id": "rev_agent_output", "severity": "high", "target": "WhatsApp Conversation workflow", "message": "Normalize the deployed agent's messages envelope into reply, case_id_display, and risk_level fields before starting a Maestro case."}
+  ]
+}

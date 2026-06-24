@@ -2,10 +2,19 @@
 %% Regenerated on every `uipath init`.
 flowchart TB
   __start__(__start__)
-  agent(agent)
-  tools(tools)
+  auth(auth)
   __end__(__end__)
-  __start__ --> agent
+  __start__ --> auth
+  auth --> agent
   agent --> __end__
-  agent --> tools
-  tools --> agent
+  subgraph agent [agent]
+    direction LR
+    __start__(__start__)
+    agent(agent)
+    tools(tools)
+    __end__(__end__)
+    __start__ --> agent
+    agent --> __end__
+    agent --> tools
+    tools --> agent
+  end

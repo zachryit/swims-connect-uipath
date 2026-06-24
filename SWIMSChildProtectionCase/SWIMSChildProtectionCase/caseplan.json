@@ -1,0 +1,389 @@
+{
+    "id": "case-8UO5TNahKV",
+    "name": "SWIMSChildProtectionCase",
+    "version": "20.0.0",
+    "description": "Governs a confirmed SWIMS child-protection case created through the UiPath WhatsApp conversation workflow.",
+    "bindings": [],
+    "variables": {
+        "inputOutputs": []
+    },
+    "metadata": {
+        "caseIdentifier": "=vars.swimsCaseId",
+        "caseAppEnabled": true,
+        "caseIdentifierType": "external",
+        "publishVersion": 2
+    },
+    "nodes": [
+        {
+            "id": "Stage_LUePBJ",
+            "type": "case-management:Stage",
+            "position": {
+                "x": 3100,
+                "y": 200
+            },
+            "style": {
+                "width": 304,
+                "opacity": 0.8
+            },
+            "measured": {
+                "width": 304,
+                "height": 128
+            },
+            "width": 304,
+            "zIndex": 1001,
+            "data": {
+                "label": "Closure",
+                "parentElement": {
+                    "id": "root",
+                    "type": "case-management:root"
+                },
+                "isInvalidDropTarget": false,
+                "isPendingParent": false,
+                "tasks": [
+                    [
+                        {
+                            "id": "t6RQ5KcSr",
+                            "displayName": "Manager Closure Approval",
+                            "description": "Attach SWIMS Manager Approval Action App after deployment.",
+                            "isRequired": true,
+                            "type": "action",
+                            "data": {
+                                "priority": "Medium"
+                            }
+                        },
+                        {
+                            "id": "tFEvPPusA",
+                            "displayName": "Close SWIMS Case",
+                            "description": "Attach SWIMSClosure API workflow after deployment.",
+                            "isRequired": true,
+                            "type": "api-workflow",
+                            "data": {}
+                        }
+                    ]
+                ],
+                "description": "Obtain manager approval and close the source SWIMS case.",
+                "isRequired": true
+            }
+        },
+        {
+            "id": "Stage_xfByJr",
+            "type": "case-management:ExceptionStage",
+            "position": {
+                "x": 2600,
+                "y": 200
+            },
+            "style": {
+                "width": 304,
+                "opacity": 0.8
+            },
+            "measured": {
+                "width": 304,
+                "height": 128
+            },
+            "width": 304,
+            "zIndex": 1001,
+            "data": {
+                "label": "Follow-up",
+                "parentElement": {
+                    "id": "root",
+                    "type": "case-management:root"
+                },
+                "isInvalidDropTarget": false,
+                "isPendingParent": false,
+                "tasks": [
+                    [
+                        {
+                            "id": "tTpq5E6Ow",
+                            "displayName": "Review Follow-up",
+                            "description": "Attach SWIMS Worker Review Action App after deployment.",
+                            "isRequired": true,
+                            "type": "action",
+                            "data": {
+                                "priority": "Medium"
+                            }
+                        },
+                        {
+                            "id": "tGOJ1mPid",
+                            "displayName": "Record Follow-up",
+                            "description": "Attach SWIMSFollowup API workflow after deployment.",
+                            "isRequired": true,
+                            "type": "api-workflow",
+                            "data": {}
+                        }
+                    ]
+                ],
+                "entryConditions": [],
+                "exitConditions": [],
+                "description": "Record repeatable follow-up work without replacing the primary lifecycle."
+            }
+        },
+        {
+            "id": "Stage_GJm728",
+            "type": "case-management:Stage",
+            "position": {
+                "x": 2100,
+                "y": 200
+            },
+            "style": {
+                "width": 304,
+                "opacity": 0.8
+            },
+            "measured": {
+                "width": 304,
+                "height": 128
+            },
+            "width": 304,
+            "zIndex": 1001,
+            "data": {
+                "label": "Service Delivery",
+                "parentElement": {
+                    "id": "root",
+                    "type": "case-management:root"
+                },
+                "isInvalidDropTarget": false,
+                "isPendingParent": false,
+                "tasks": [
+                    [
+                        {
+                            "id": "tKqeOS2vI",
+                            "displayName": "Confirm Service Delivery",
+                            "description": "Attach SWIMS Worker Review Action App after deployment.",
+                            "isRequired": true,
+                            "type": "action",
+                            "data": {
+                                "priority": "Medium"
+                            }
+                        },
+                        {
+                            "id": "t2KIGKOSm",
+                            "displayName": "Mark Service Delivered",
+                            "description": "Attach SWIMSServiceDelivery API workflow after deployment.",
+                            "isRequired": true,
+                            "type": "api-workflow",
+                            "data": {}
+                        }
+                    ]
+                ],
+                "description": "Confirm implementation and mark referred services delivered.",
+                "isRequired": true
+            }
+        },
+        {
+            "id": "Stage_MErsxI",
+            "type": "case-management:Stage",
+            "position": {
+                "x": 1600,
+                "y": 200
+            },
+            "style": {
+                "width": 304,
+                "opacity": 0.8
+            },
+            "measured": {
+                "width": 304,
+                "height": 128
+            },
+            "width": 304,
+            "zIndex": 1001,
+            "data": {
+                "label": "Service Referral",
+                "parentElement": {
+                    "id": "root",
+                    "type": "case-management:root"
+                },
+                "isInvalidDropTarget": false,
+                "isPendingParent": false,
+                "tasks": [
+                    [
+                        {
+                            "id": "t0BfFVM2H",
+                            "displayName": "Review Service Referral",
+                            "description": "Attach SWIMS Worker Review Action App after deployment.",
+                            "isRequired": true,
+                            "type": "action",
+                            "data": {
+                                "priority": "Medium"
+                            }
+                        },
+                        {
+                            "id": "tVfkyzAqu",
+                            "displayName": "Add Service Referral",
+                            "description": "Attach SWIMSServiceReferral API workflow after deployment.",
+                            "isRequired": true,
+                            "type": "api-workflow",
+                            "data": {}
+                        }
+                    ]
+                ],
+                "description": "Confirm and record a trackable service referral.",
+                "isRequired": true
+            }
+        },
+        {
+            "id": "Stage_FQYFOn",
+            "type": "case-management:Stage",
+            "position": {
+                "x": 1100,
+                "y": 200
+            },
+            "style": {
+                "width": 304,
+                "opacity": 0.8
+            },
+            "measured": {
+                "width": 304,
+                "height": 128
+            },
+            "width": 304,
+            "zIndex": 1001,
+            "data": {
+                "label": "Case Plan",
+                "parentElement": {
+                    "id": "root",
+                    "type": "case-management:root"
+                },
+                "isInvalidDropTarget": false,
+                "isPendingParent": false,
+                "tasks": [
+                    [
+                        {
+                            "id": "t24sbuBcT",
+                            "displayName": "Review Case Plan",
+                            "description": "Attach SWIMS Worker Review Action App after deployment.",
+                            "isRequired": true,
+                            "type": "action",
+                            "data": {
+                                "priority": "Medium"
+                            }
+                        },
+                        {
+                            "id": "tBvzZqSWe",
+                            "displayName": "Record Case Plan",
+                            "description": "Attach SWIMSCasePlan API workflow after deployment.",
+                            "isRequired": true,
+                            "type": "api-workflow",
+                            "data": {}
+                        }
+                    ]
+                ],
+                "description": "Confirm and record goals, interventions, and tracking dates.",
+                "isRequired": true
+            }
+        },
+        {
+            "id": "Stage_uHDysB",
+            "type": "case-management:Stage",
+            "position": {
+                "x": 600,
+                "y": 200
+            },
+            "style": {
+                "width": 304,
+                "opacity": 0.8
+            },
+            "measured": {
+                "width": 304,
+                "height": 128
+            },
+            "width": 304,
+            "zIndex": 1001,
+            "data": {
+                "label": "Assessment",
+                "parentElement": {
+                    "id": "root",
+                    "type": "case-management:root"
+                },
+                "isInvalidDropTarget": false,
+                "isPendingParent": false,
+                "tasks": [
+                    [
+                        {
+                            "id": "t7RV54hAt",
+                            "displayName": "Review Assessment",
+                            "description": "Attach SWIMS Worker Review Action App after deployment.",
+                            "isRequired": true,
+                            "type": "action",
+                            "data": {
+                                "priority": "Medium"
+                            }
+                        },
+                        {
+                            "id": "tVWjXRxTl",
+                            "displayName": "Record Assessment",
+                            "description": "Attach SWIMSAssessment API workflow after deployment.",
+                            "isRequired": true,
+                            "type": "api-workflow",
+                            "data": {}
+                        }
+                    ]
+                ],
+                "description": "Capture and record the worker-confirmed safety assessment.",
+                "isRequired": true
+            }
+        },
+        {
+            "id": "Stage_88uGZs",
+            "type": "case-management:Stage",
+            "position": {
+                "x": 100,
+                "y": 200
+            },
+            "style": {
+                "width": 304,
+                "opacity": 0.8
+            },
+            "measured": {
+                "width": 304,
+                "height": 128
+            },
+            "width": 304,
+            "zIndex": 1001,
+            "data": {
+                "label": "Intake",
+                "parentElement": {
+                    "id": "root",
+                    "type": "case-management:root"
+                },
+                "isInvalidDropTarget": false,
+                "isPendingParent": false,
+                "tasks": [
+                    [
+                        {
+                            "id": "tSS61vDON",
+                            "displayName": "Validate Intake Report",
+                            "shouldRunOnlyOnce": true,
+                            "description": "Validate the confirmed intake payload, real SWIMS Case ID, risk and protection concerns.",
+                            "isRequired": true,
+                            "type": "agent",
+                            "data": {}
+                        },
+                        {
+                            "id": "t12r3VrZW",
+                            "displayName": "Review Worker Intake",
+                            "shouldRunOnlyOnce": true,
+                            "description": "Attach SWIMS Worker Review Action App after deployment.",
+                            "type": "action",
+                            "data": {
+                                "priority": "Medium"
+                            }
+                        }
+                    ]
+                ],
+                "description": "Extract and file the report and retain the real SWIMS Case ID.",
+                "isRequired": true
+            }
+        },
+        {
+            "id": "trigger_1",
+            "type": "case-management:Trigger",
+            "position": {
+                "x": 0,
+                "y": 0
+            },
+            "data": {
+                "label": "Trigger 1"
+            }
+        }
+    ],
+    "edges": []
+}
