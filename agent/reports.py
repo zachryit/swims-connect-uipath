@@ -1,8 +1,10 @@
 """SWIMS reporting + client-side task derivation — Python port of .swimsbot's
 lib/swims-tasks.js + lib/scheduled-reports.js (report generation half).
 
-Primero's /api/v2/tasks endpoint is 403 even for the superuser on SWIMS deployments, so
-tasks are derived CLIENT-SIDE from the same date fields Primero's task engine reads
+Primero's /api/v2/tasks endpoint is permission-gated: the CP case-worker (self-scope) role CAN
+read it (200), while admin/superuser and supervisor (group) roles get 403. So worker task reports
+use the NATIVE /tasks engine (authoritative), and fall back to client-side derivation from date
+fields (used for supervisor/manager scope, where /tasks is 403)
 (docs/swims-workflow-and-reporting-implementation.md §1.2). Every report consumes derive_tasks().
 
 generate_report(client, kind, *, concern, status, limit, now) -> formatted text. `client` is an
@@ -434,6 +436,70 @@ def _format(kind, all_cases, now, meta, concern=None, limit=10):
     return "\n".join(lines)
 
 
+# ── native Primero /tasks (worker scope) ─────────────────────────────────────
+# Report types that are a flat task list — these can be served from the native /tasks engine
+# (authoritative) when the account is permitted; else client-side derivation.
+_TASK_LIST_TYPES = {"tasks-due-today", "overdue-tasks", "pending-referrals",
+                    "overdue-followups", "upcoming-followups"}
+_NATIVE_TYPE = {"follow_up": "followup"}  # native uses follow_up; we use followup
+
+
+def _fetch_native_tasks(client) -> list[dict] | None:
+    """Read Primero's own task list. Returns the raw task objects, or None if the account lacks
+    the /tasks permission (403 for admin/superuser/supervisor here)."""
+    rows: list[dict] = []
+    for page in range(1, 11):
+        r = client.request("GET", "/tasks", params={"per": 100, "page": page})
+        if r.status_code == 403:
+            return None
+        if r.status_code != 200:
+            return None
+        body = r.json()
+        batch = body.get("data", [])
+        rows.extend(batch)
+        total = int((body.get("metadata") or {}).get("total") or len(rows))
+        if len(rows) >= total or not batch:
+            break
+    return rows
+
+
+def _native_cases(client, now) -> list[dict] | None:
+    """Group native /tasks into pseudo-cases (case_id_display, name, tasks[]) so the existing
+    task-report formatter can render them. Returns None if /tasks is not permitted."""
+    raw = _fetch_native_tasks(client)
+    if raw is None:
+        return None
+    by_case: dict = {}
+    for t in raw:
+        ttype = _NATIVE_TYPE.get(t.get("type"), t.get("type"))
+        due = None
+        raw_due = t.get("due_date")
+        if raw_due:
+            try:
+                due = datetime.strptime(raw_due, "%d-%b-%Y").replace(tzinfo=timezone.utc)
+            except Exception:
+                due = _parse(raw_due)
+        if t.get("overdue"):
+            status = "overdue"
+            days = round((_day_key(now) - _day_key(due)) / 86400) if due else 1
+        elif due and _day_key(due) == _day_key(now):
+            status, days = "due_today", 0
+        else:
+            status, days = "upcoming", 0
+        task = {"type": ttype, "label": LABELS.get(ttype, t.get("type_display") or ttype),
+                "due_date": due.date().isoformat() if due else None, "status": status,
+                "days_overdue": days, "detail": t.get("detail"), "priority": t.get("priority"),
+                "case_id_display": t.get("record_id_display"), "case_uuid": t.get("id"),
+                "referred_on": None}
+        cid = task["case_uuid"] or task["case_id_display"]
+        c = by_case.setdefault(cid, {"id": task["case_uuid"], "case_id_display": task["case_id_display"],
+                                     "name": t.get("name") or "(No name)", "status": "open",
+                                     "risk_level": (t.get("priority") if t.get("priority") in ("high", "critical") else None),
+                                     "protection_concerns": [], "tasks": []})
+        c["tasks"].append(task)
+    return list(by_case.values())
+
+
 # ── public entrypoint ───────────────────────────────────────────────────────
 def available_reports() -> list[dict]:
     return [{"kind": k, "label": v} for k, v in REPORT_TYPES.items()]
@@ -447,6 +513,13 @@ def generate_report(client, kind: str, *, concern: str | None = None, status: st
         return (f"I don't have a '{kind}' report. Available: "
                 + ", ".join(REPORT_TYPES.keys()) + ".")
     concern_code = resolve_concern(concern) if concern else None
+    # Worker flat-task reports: prefer Primero's NATIVE /tasks engine (authoritative). The native
+    # task list carries no protection_concerns, so a concern-scoped request falls back to
+    # client-side derivation (which fetches full records). /tasks 403 (admin/supervisor) -> fallback.
+    if kind in _TASK_LIST_TYPES and not concern_code:
+        native = _native_cases(client, now)
+        if native is not None:
+            return _format(kind, native, now, {}, concern=None, limit=limit)
     cap = 2000 if kind in ("supervisor-daily", "manager-weekly") else 200
     if kind in DETAILED_TYPES:
         res = _fetch_detailed(client, now, cap=cap, status=status)
