@@ -4,20 +4,23 @@ primero.py; in the UiPath tenant the same operations are invoked as API Workflow
 """
 from __future__ import annotations
 import contextvars
+from typing import Annotated
+
 from langchain_core.tools import tool
+from langgraph.prebuilt import InjectedState
 
 from primero import PrimeroClient, anon_client, worker_client, client_from_session
 
 _anon: PrimeroClient | None = None
 _worker_c: PrimeroClient | None = None
 
-# The acting user's SWIMS session for the current invocation. Set by the agent entrypoint
-# from the logged-in WhatsApp user's session (passed in by the gateway). When unset, dev
-# falls back to a test worker login. There is NO hard-coded role — the user's real Primero
-# role governs every authenticated action (a worker closing -> 403 -> approval requested;
-# a manager closing -> done). This is the .swimsbot per-sender session model.
+# The acting user's SWIMS session for the current invocation. PRIMARY channel is the graph
+# state (InjectedState) — the gateway/auth-node puts the logged-in worker's session there, and
+# state crosses node/process boundaries in the hosted runtime (module globals do NOT). The
+# contextvars/globals below are a fallback for the local single-process path. There is NO
+# hard-coded role — the user's real Primero role governs every authenticated action.
 _acting_session: contextvars.ContextVar[dict | None] = contextvars.ContextVar("acting_session", default=None)
-_acting_global: dict | None = None  # fallback when the contextvar doesn't cross LangGraph node tasks
+_acting_global: dict | None = None
 _channel_context: contextvars.ContextVar[dict | None] = contextvars.ContextVar("channel_context", default=None)
 _channel_global: dict | None = None
 
@@ -37,7 +40,20 @@ def set_channel_context(sender: str | None, message_id: str | None, channel: str
     _channel_global = val
 
 
-def _channel() -> dict:
+def _session_from(state: dict | None) -> dict | None:
+    """The acting session for THIS call: injected graph state first (cross-process safe),
+    then the contextvar/global fallback (local path)."""
+    if state:
+        s = state.get("swims_session")
+        if isinstance(s, dict) and s.get("cookie"):
+            return s
+    return _acting_session.get() or _acting_global
+
+
+def _channel(state: dict | None = None) -> dict:
+    if state and (state.get("swims_sender") or state.get("swims_channel")):
+        return {"sender": state.get("swims_sender"), "message_id": state.get("swims_message_id"),
+                "channel": state.get("swims_channel") or "whatsapp"}
     return _channel_context.get() or _channel_global or {}
 
 
@@ -57,17 +73,17 @@ def _worker() -> PrimeroClient:
     return _worker_c
 
 
-def _acting() -> PrimeroClient:
-    """The authenticated user acting now: their injected session, else the dev worker login.
-    All authenticated lifecycle actions (incl. close) run as this user; Primero enforces role."""
-    sess = _acting_session.get() or _acting_global
+def _acting(state: dict | None = None) -> PrimeroClient:
+    """The authenticated user acting now: their injected session. All authenticated lifecycle
+    actions (incl. close) run as this user; Primero enforces role."""
+    sess = _session_from(state)
     if sess and sess.get("cookie"):
         return client_from_session(sess["cookie"], sess["csrf"])
     raise PermissionError("needs_login: worker authentication is required for this SWIMS action")
 
 
-def _has_acting() -> bool:
-    sess = _acting_session.get() or _acting_global
+def _has_acting(state: dict | None = None) -> bool:
+    sess = _session_from(state)
     return bool(sess and sess.get("cookie"))
 
 
@@ -93,6 +109,7 @@ def create_case(
     child_sex: str = "",
     reporter_contact: str = "",
     follow_up_allowed: bool | None = None,
+    state: Annotated[dict, InjectedState] = None,
 ) -> dict:
     """File a child-protection case in SWIMS/Primero from an intake report.
 
@@ -105,8 +122,8 @@ def create_case(
     critical|high|medium|low. Returns the REAL SWIMS Case ID as `case_id_display` —
     report that value to the user verbatim and never invent one.
     """
-    ctx = _channel()
-    use_worker = bool((_acting_session.get() or _acting_global or {}).get("cookie"))
+    ctx = _channel(state)
+    use_worker = _has_acting(state)
     report = {
         "narrative": narrative,
         "incident_type": incident_type or None,
@@ -125,17 +142,19 @@ def create_case(
         "anonymous": not use_worker,
         "channel": ctx.get("channel") or "whatsapp_text",
     }
-    return (_acting() if use_worker else _client()).create_case(report)
+    return (_acting(state) if use_worker else _client()).create_case(report)
 
 
 @tool
-def get_case(case_id: str) -> dict:
+def get_case(case_id: str, state: Annotated[dict, InjectedState] = None) -> dict:
     """Look up a SWIMS case by its case_id_display or UUID. Returns status, workflow stage,
     risk level, and key fields. Reads as the acting (logged-in) user — Primero scopes
     visibility to cases they own/are assigned."""
-    if not _has_acting():
+    if not _has_acting(state):
         return _needs_login("case information")
-    d = _acting().get_case(case_id)
+    d = _acting(state).get_case(case_id)
+    if not d:
+        return {"ok": False, "message": f"I couldn't find case {case_id}, or you don't have access to it."}
     return {
         "case_id_display": d.get("case_id_display"),
         "status": d.get("status"),
@@ -147,12 +166,13 @@ def get_case(case_id: str) -> dict:
 
 
 @tool
-def list_cases(per: int = 10, status: str = "", risk_level: str = "") -> list[dict]:
+def list_cases(per: int = 10, status: str = "", risk_level: str = "",
+               state: Annotated[dict, InjectedState] = None) -> list[dict]:
     """List recent SWIMS cases (as the acting user), optionally filtered by status
     (open|closed) or risk_level."""
-    if not _has_acting():
+    if not _has_acting(state):
         return [_needs_login("case lists and reports")]
-    rows = _acting().list_cases(per=per, status=status or None, risk_level=risk_level or None)
+    rows = _acting(state).list_cases(per=per, status=status or None, risk_level=risk_level or None)
     return [
         {"case_id_display": r.get("case_id_display"), "status": r.get("status"),
          "risk_level": r.get("risk_level"), "workflow": r.get("workflow")}
@@ -178,13 +198,14 @@ def find_services(district: str = "", category: str = "", search: str = "") -> d
 @tool
 def record_assessment(case_id: str, assessment_date: str, case_plan_due: str,
                       requested_by: str = "", threats: str = "", capacities: str = "",
-                      category: str = "", decision: str = "") -> dict:
+                      category: str = "", decision: str = "",
+                      state: Annotated[dict, InjectedState] = None) -> dict:
     """Record the safety assessment on a SWIMS case and advance it to the assessment stage.
     Dates are YYYY-MM-DD. `category` is one of safe|safety_plan|unsafe. `case_plan_due` is
     required (it creates the native Case Plan task). Use after the intake report is filed."""
-    if not _has_acting():
+    if not _has_acting(state):
         return _needs_login("case lifecycle updates")
-    return _acting().record_assessment(
+    return _acting(state).record_assessment(
         case_id, assessment_date=assessment_date, case_plan_due=case_plan_due,
         requested_by=requested_by or None, threats=threats or None, capacities=capacities or None,
         category=category or None, decision=decision or None)
@@ -192,58 +213,63 @@ def record_assessment(case_id: str, assessment_date: str, case_plan_due: str,
 
 @tool
 def record_case_plan(case_id: str, date: str, goal: str = "", goal_due: str = "",
-                    review_date: str = "", interventions: list[dict] | None = None) -> dict:
+                    review_date: str = "", interventions: list[dict] | None = None,
+                    state: Annotated[dict, InjectedState] = None) -> dict:
     """Record the case plan (advances the case to the case_plan stage) and add interventions.
     `date` (YYYY-MM-DD) is the workflow trigger. `interventions` is a list of
     {service, goal?, provider?, due?} items."""
-    if not _has_acting():
+    if not _has_acting(state):
         return _needs_login("case lifecycle updates")
-    return _acting().record_case_plan(
+    return _acting(state).record_case_plan(
         case_id, date=date, goal=goal or None, goal_due=goal_due or None,
         review_date=review_date or None, interventions=interventions or [])
 
 
 @tool
 def add_service_referral(case_id: str, service_type: str, timeframe: str,
-                        appointment: str = "", notes: str = "", provider: str = "") -> dict:
+                        appointment: str = "", notes: str = "", provider: str = "",
+                        state: Annotated[dict, InjectedState] = None) -> dict:
     """Refer a service on a SWIMS case (advances to service_provision). `service_type` e.g.
     psychosocial_service, health_medical_service. `timeframe` is one of 1_hour|3_hours|1_day|3_days."""
-    if not _has_acting():
+    if not _has_acting(state):
         return _needs_login("case service referrals")
-    return _acting().add_service_referral(
+    return _acting(state).add_service_referral(
         case_id, service_type=service_type, timeframe=timeframe,
         appointment=appointment or None, notes=notes or None, provider=provider or None)
 
 
 @tool
-def mark_service_delivered(case_id: str, date: str, service_type: str = "", service_id: str = "") -> dict:
+def mark_service_delivered(case_id: str, date: str, service_type: str = "", service_id: str = "",
+                           state: Annotated[dict, InjectedState] = None) -> dict:
     """Mark a referred service delivered (YYYY-MM-DD). Identify it by service_type or service_id.
     When all services are delivered the case advances to services_implemented."""
-    if not _has_acting():
+    if not _has_acting(state):
         return _needs_login("case service updates")
-    return _acting().mark_service_delivered(
+    return _acting(state).mark_service_delivered(
         case_id, date=date, service_type=service_type or None, service_id=service_id or None)
 
 
 @tool
 def record_followup(case_id: str, needed_by: str = "", date: str = "", followup_type: str = "",
-                   service_type: str = "", comments: str = "") -> dict:
+                   service_type: str = "", comments: str = "",
+                   state: Annotated[dict, InjectedState] = None) -> dict:
     """Add a follow-up to a SWIMS case. Provide `needed_by` (planned, YYYY-MM-DD) or `date`
     (completed). Optional followup_type, service_type, comments."""
-    if not _has_acting():
+    if not _has_acting(state):
         return _needs_login("case follow-up updates")
-    return _acting().record_followup(
+    return _acting(state).record_followup(
         case_id, needed_by=needed_by or None, date=date or None,
         followup_type=followup_type or None, service_type=service_type or None, comments=comments or None)
 
 
 @tool
-def close_case(case_id: str, reason: str = "", notes: str = "") -> dict:
+def close_case(case_id: str, reason: str = "", notes: str = "",
+               state: Annotated[dict, InjectedState] = None) -> dict:
     """Close a SWIMS case. If the acting account lacks the CLOSE permission (CP Worker), this
     returns approval_requested=true and routes the closure to a CP Manager for approval."""
-    if not _has_acting():
+    if not _has_acting(state):
         return _needs_login("case closure")
-    return _acting().close_case(case_id, reason=reason or None, notes=notes or None)
+    return _acting(state).close_case(case_id, reason=reason or None, notes=notes or None)
 
 
 TOOLS = [

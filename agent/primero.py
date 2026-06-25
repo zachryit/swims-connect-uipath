@@ -17,6 +17,7 @@ from concerns import normalize_concerns
 
 API_BASE = os.environ.get("PRIMERO_API_BASE_URL", "http://127.0.0.1:3000/api/v2").rstrip("/")
 TIMEOUT = float(os.environ.get("PRIMERO_TIMEOUT_S", "60"))
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 
 
 # ── field helpers (ported) ────────────────────────────────────────────────────
@@ -262,9 +263,30 @@ class PrimeroClient:
             "assessment_due_date": data["assessment_due_date"],
         }
 
+    def _case_uuid(self, case_id: str) -> str | None:
+        """Resolve a SWIMS Case ID to the record UUID. Primero's /cases/{id} endpoint needs the
+        UUID; people (and list_cases) use the short case_id_display (e.g. '43abe2a'). Returns the
+        UUID, or None if the short id can't be found (so callers fail gracefully, not with a 404)."""
+        cid = str(case_id or "").strip()
+        if _UUID_RE.match(cid):
+            return cid
+        r = self.request("GET", "/cases", params={"query": cid, "per": 20})
+        if r.status_code == 200:
+            rows = r.json().get("data", [])
+            exact = next((x for x in rows if str(x.get("case_id_display") or x.get("short_id") or "") == cid), None)
+            if exact and exact.get("id"):
+                return exact["id"]
+            if len(rows) == 1 and rows[0].get("id"):
+                return rows[0]["id"]
+        return None
+
     def get_case(self, case_id: str) -> dict:
-        r = self.request("GET", f"/cases/{case_id}")
-        r.raise_for_status()
+        uuid = self._case_uuid(case_id)
+        if not uuid:
+            return {}  # not found / not accessible — caller returns a friendly message
+        r = self.request("GET", f"/cases/{uuid}")
+        if r.status_code != 200:
+            return {}
         return r.json().get("data", {})
 
     def list_cases(self, per: int = 20, **filters) -> list[dict]:
@@ -279,10 +301,11 @@ class PrimeroClient:
         return str(v if v is not None else "").strip().lower()
 
     def _patch(self, case_id: str, data: dict, record_action: str | None = None) -> requests.Response:
+        uuid = self._case_uuid(case_id) or case_id  # lifecycle PATCHes also need the UUID
         body: dict = {"data": data}
         if record_action:
             body["record_action"] = record_action
-        return self.request("PATCH", f"/cases/{case_id}", json=body)
+        return self.request("PATCH", f"/cases/{uuid}", json=body)
 
     @staticmethod
     def _ok(r: requests.Response, op: str) -> dict:

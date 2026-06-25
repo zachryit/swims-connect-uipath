@@ -1,5 +1,6 @@
 import { UiPath } from "@uipath/uipath-typescript/core";
 import { ConversationalAgent, MessageRole } from "@uipath/uipath-typescript/conversational-agent";
+import { mintBridgeToken, stripContextLines } from "./bridge.js";
 
 function shortHash(value) {
   let hash = 0;
@@ -88,6 +89,27 @@ export class UiPathConversationClient {
     this.agentRelease = null;
     this.agentReleaseResolvedAt = 0;
     this.sessions = new Map();
+    this.connectionCreatedAt = 0;
+  }
+
+  // A stale shared CAS connection surfaces as these. Safe to reset + retry: they fail BEFORE the
+  // agent processes the turn (retrieve/dispatch stage), so retrying cannot double-create anything.
+  #isConnectionError(error) {
+    const m = String(error?.message || error || "");
+    return /CLIENT_MESSAGE_DISPATCH_FAILED|retrieving Conversational Agent|did not become ready|socket|ECONNRESET|ETIMEDOUT|disconnect|not connected|connection (closed|lost|reset)/i.test(m);
+  }
+
+  // Tear down the cached SDK/agent/sessions so the next call builds a fresh connection.
+  #resetConnection() {
+    for (const runtime of this.sessions.values()) {
+      try { runtime.conversation?.endSession?.(); } catch {}
+    }
+    this.sessions.clear();
+    this.conversationalAgent = null;
+    this.sdk = null;
+    this.agentRelease = null;
+    this.agentReleaseResolvedAt = 0;
+    this.connectionCreatedAt = 0;
   }
 
   async turn(inbound) {
@@ -97,9 +119,19 @@ export class UiPathConversationClient {
     const sender = inbound.sender;
     const state = this.stateStore.get(sender);
     const hist = state.history || [];
-    hist.push({ role: "user", content: inbound.text });
+    // Strip any SWIMS_CTX marker a user might have TYPED (anti-spoofing) before we add our own.
+    const cleanText = stripContextLines(inbound.text);
+    hist.push({ role: "user", content: cleanText });
 
     const worker = await this.sessionManager.worker(sender);
+    // Worker auth-context bridge: when this sender is a signed-in worker, prepend an opaque,
+    // sender-bound, short-TTL token to the message. The agent's auth node exchanges it for the
+    // worker's Primero session (the only channel that reaches a conversational agent is the
+    // message text). Anonymous senders get no token -> agent stays anonymous.
+    const token = (worker && this.config.bridgeSecret)
+      ? mintBridgeToken(sender, this.config.bridgeSecret, this.config.bridgeTokenTtlMs)
+      : null;
+    inbound.agentText = token ? `[SWIMS_CTX ${token}]\n${cleanText}` : cleanText;
     const payload = {
       messages: hist,
       swims_session: worker ? { cookie: worker.cookie, csrf: worker.csrf } : null,
@@ -108,7 +140,19 @@ export class UiPathConversationClient {
       swims_channel: inbound.channel || "whatsapp"
     };
 
-    const result = await this.#invokeConversational(inbound, payload, worker);
+    let result;
+    try {
+      result = await this.#invokeConversational(inbound, payload, worker);
+    } catch (error) {
+      // Self-heal a stale shared CAS connection: reset and retry once with a fresh connection.
+      if (this.#isConnectionError(error)) {
+        this.logger.warn({ err: error?.message, sender }, "UiPath conversational connection stale; resetting and retrying once");
+        this.#resetConnection();
+        result = await this.#invokeConversational(inbound, payload, worker);
+      } else {
+        throw error;
+      }
+    }
 
     if (result.error) throw new Error(result.error);
     // An empty turn is not an error — the agent occasionally completes an exchange without
@@ -127,6 +171,11 @@ export class UiPathConversationClient {
   }
 
   async #ensureConversationalAgent() {
+    // Proactively recycle a long-lived connection before its CAS socket/auth goes stale.
+    if (this.conversationalAgent && this.connectionCreatedAt
+        && (Date.now() - this.connectionCreatedAt) > this.config.connectionMaxAgeMs) {
+      this.#resetConnection();
+    }
     if (this.conversationalAgent) return this.conversationalAgent;
     if (!this.config.uipathBaseUrl || !this.config.uipathOrg || !this.config.uipathTenant || !this.config.uipathToken) {
       throw new Error("UiPath conversational SDK is not configured: set UIPATH_URL/UIPATH_ORG/UIPATH_TENANT and UIPATH_ACCESS_TOKEN");
@@ -146,6 +195,7 @@ export class UiPathConversationClient {
     this.conversationalAgent.onConnectionStatusChanged((status, error) => {
       this.logger.debug({ status, error: error?.message }, "UiPath conversational socket status changed");
     });
+    this.connectionCreatedAt = Date.now();
     return this.conversationalAgent;
   }
 
@@ -375,7 +425,7 @@ export class UiPathConversationClient {
             }
           });
           await exchange.sendMessageWithContentPart({
-            data: inbound.text,
+            data: inbound.agentText || inbound.text,
             role: MessageRole.User,
             mimeType: "text/plain"
           });

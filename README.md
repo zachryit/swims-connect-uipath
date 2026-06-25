@@ -1,123 +1,241 @@
 # SWIMS-Connect on UiPath
 
-**An agentic, human-in-the-loop child-protection case-management solution built on UiPath.**
-*UiPath AgentHack submission — **Track 1: UiPath Maestro Case**.*
+**An agentic, human-in-the-loop child-protection intake & case-management solution built on UiPath.**
+*UiPath AgentHack submission — **Track: UiPath Maestro Case**.*
 
-SWIMS-Connect lets community members file (optionally anonymous) child-protection reports in natural language or voice, and lets social-welfare field workers run a full caseload — **intake → assessment → case plan → service referral → service delivery → closure** — backed by the **Primero/SWIMS (UNICEF)** case system. This repository re-architects that workflow as a UiPath-native solution where **UiPath Maestro orchestrates a dynamic, exception-heavy case** across an AI agent, API integrations, and people, keeping humans in charge at every decision point.
+SWIMS-Connect lets community members file (optionally anonymous) child-protection reports over
+WhatsApp in natural language, voice, or images, and lets signed-in social-welfare workers query
+and manage their caseload — backed by the **Primero/SWIMS (UNICEF)** case system. A **UiPath
+coded conversational agent** (LangGraph + Gemini) does the reasoning and SWIMS writes; a
+transport-only WhatsApp adapter carries the conversation.
 
-> Built **with the Claude Code coding agent** using the UiPath skills catalog (`uip skills install --agent claude`). See [Built with Claude Code](#built-with-claude-code).
+> Built **with the Claude Code coding agent** + the UiPath skills catalog (`uip skills install --agent claude`).
 
 ---
 
-## What it does
+## Status — what works today vs. what's next
 
-- **Live WhatsApp intake** → people message **+233256590242** through the repository's transport-only Baileys adapter; an authenticated UiPath API trigger invokes the **Python LangGraph agent** running **Google Gemini 3.1 Pro**. The agent gathers a complete report and opens a real Primero case (with a real Case ID — never fabricated).
-- **Orchestrated case lifecycle** → **UiPath Maestro Case** moves each case through its stages with handoffs between the AI agent, API workflows (robotic integration), and human workers, with SLAs, exit criteria, and rework loops for the exceptions that can't be pre-defined.
-- **Humans in charge** → confirm-before-write and **manager-only case closure** are enforced as **UiPath Action Center** approval tasks, not prompt rules.
-- **Governed** → all LLM traffic and agent actions run under the **UiPath AI Trust Layer** (PII masking, guardrails, audit) with full **agent traces** (tokens, latency, decisions) for compliance.
-- **Recurring oversight** → scheduled caseload reports (high-risk, overdue follow-ups, pending referrals, …) via Orchestrator triggers.
+**✅ Built & verified end-to-end (against the live SWIMS instance + deployed agent):**
+- **Anonymous intake** over WhatsApp (text, **voice note** → transcribe, **image** → vision) →
+  consent gate → **real Primero case** with a real Case ID (filed by the `primero_cp` anonymous
+  service account).
+- **Media attachment** — the original photo/voice note is attached to the created case (as the
+  case-owning worker, so Primero authorization is satisfied).
+- **Worker secure login** — a worker taps a one-time HTTPS link, signs in to **their own Primero
+  account**; the session is stored encrypted and silently renewed.
+- **Worker auth-context bridge** — signed-in workers can ask the agent about cases (list, status,
+  details) and the agent acts **as that worker**, so **Primero enforces their real role** (a
+  blocked action returns a clean "no"). See [Worker auth-context bridge](#worker-auth-context-bridge).
 
-See **[ARCHITECTURE.md](ARCHITECTURE.md)** for the full diagram.
+**🚧 Scaffolded / next (project present, not yet wired into the live flow):**
+- **UiPath Maestro Case** orchestration of the full lifecycle (intake → assessment → case plan →
+  service referral → delivery → closure) — the project is in `SWIMSChildProtectionCase/`.
+- **Action Center** human-in-the-loop approval (e.g. manager-only case closure).
+- Scheduled caseload reports via Orchestrator triggers.
+
+---
+
+## Architecture (live path)
+
+```
+WhatsApp (+233256590242)
+   │  Baileys adapter (transport only)
+   ▼
+whatsapp-gateway (Node)
+   ├─ deterministic routing: greeting / login / logout / worker-only gating / consent
+   ├─ media: Gemini vision (image) / transcription (voice) → text for the agent
+   ├─ secure worker login server  (127.0.0.1:18794, public via nginx /login/)
+   └─ UiPath TypeScript conversational SDK  ──────────────►  UiPath Automation Cloud
+                                                              swims-connect-agent (coded, LangGraph + Gemini)
+                                                                ├─ tools → Primero/SWIMS REST (/api/v2)
+                                                                └─ auth-context bridge → acts as the signed-in worker
+```
+
+- The agent is a **conversational coded agent** (`agent/uipath.json` → `isConversational: true`).
+  The gateway talks to it with `@uipath/uipath-typescript` — there is **no per-turn StartJobs**.
+- A conversational agent only receives the **message text**, so the signed-in worker's session is
+  carried by the [auth-context bridge](#worker-auth-context-bridge), not by agent input.
+- Full notes: [docs/WHATSAPP-UIPATH-ARCHITECTURE.md](docs/WHATSAPP-UIPATH-ARCHITECTURE.md).
+
+### Worker auth-context bridge
+
+A conversational agent can't be handed a secret per turn, so worker auth flows like this:
+
+1. Worker signs in via the login link → gateway stores their Primero session.
+2. On each of that worker's messages the gateway prepends an **opaque, HMAC-signed, sender-bound,
+   short-TTL token** `[SWIMS_CTX …]` (and strips any the user typed, anti-spoofing).
+3. The agent's first node exchanges that token for the worker's session at a secret-protected
+   gateway endpoint (`POST /login/session-context`), puts the session in **graph state** (so it
+   reaches tools via `InjectedState`), and **strips the token before the LLM sees it**.
+4. Every tool acts as that worker → **Primero enforces the role**. No SWIMS cookie ever touches
+   the LLM context.
 
 ---
 
 ## UiPath components used
 
-| Component | Role in the solution |
+| Component | Role |
 |---|---|
-| **UiPath Maestro — Case Management** | Orchestrates the case lifecycle (stages, handoffs, SLAs, exit criteria, rework loops); case/stage-manager agents route work at runtime |
-| **Coded agent (Python, LangGraph)** | Conversational intake + field extraction + voice ASR / image captioning; model = **Google Gemini 3.1 Pro** (bring-your-own-key) |
-| **Maestro Flow + API Workflows** | `WhatsAppConversation` receives API-triggered turns and invokes the agent; API Workflows perform governed Primero reads/writes |
-| **Baileys channel adapter** | Transport-only link for WhatsApp number +233256590242; all reasoning and orchestration remain in UiPath |
-| **UiPath Action Center + Action App** | Human-in-the-loop: worker confirm/edit, manager closure approval |
-| **AI Trust Layer** | LLM guardrails, PII masking, prompt/response audit, token-usage tracking |
-| **UiPath Orchestrator** | Folders, Credential/Secret assets (Gemini key, Primero creds), jobs, time triggers (scheduled reports), agent traces |
+| **Coded conversational agent** (Python, LangGraph) | Intake + extraction + voice/image understanding + SWIMS reads/writes; model from the `SWIMS_GEMINI_MODEL` asset (currently **gemini-2.5-pro**, bring-your-own Google key) |
+| **UiPath TypeScript conversational SDK** | The gateway's only runtime path to the agent (`@uipath/uipath-typescript`) |
+| **UiPath Orchestrator** | Process/release for `swims-connect-agent`; **Text/Secret assets** for Gemini key, Primero creds, default owner, and the bridge secret/URL; jobs & agent traces |
+| **UiPath Maestro Case** (`SWIMSChildProtectionCase/`) | Case-lifecycle orchestration — scaffolded; next to wire in |
+| **Baileys channel adapter** | Transport-only WhatsApp link for +233256590242 |
 
-**Agent type:** **combination** — low-code orchestration (Maestro Case + Action Apps) **plus** a **coded** LangGraph/Gemini agent — **built with the Claude Code coding agent**.
-
-**External frameworks / models:** LangGraph (LangChain) + Google Gemini 3.1 Pro, integrated via UiPath's `uipath-langchain` SDK and bring-your-own-key.
+**Agent type:** combination (coded LangGraph/Gemini agent + planned low-code Maestro Case) — **built with Claude Code**.
 
 ---
 
 ## Prerequisites
 
-- A **UiPath Automation Cloud** tenant with Maestro, Agents, Action Center, and Integration Service (the AgentHack **UiPath Labs** tenant; request early — provisioning takes 3–5 business days).
-- **Python 3.11–3.13** (coded agents do not support 3.10).
-- **Node.js 22+** (UiPath CLI and Baileys gateway).
-- A **Google API key** for `gemini-3.1-pro-preview` (+ `gemini-2.5-flash` fallback).
-- A reachable **Primero/SWIMS** backend (`/api/v2`) + its service-account credentials and OpenAPI/Swagger spec. (We reuse the existing live instance.)
+- **UiPath Automation Cloud** tenant (this build: org `hackathon26_895`, tenant `DefaultTenant`, folder `Shared`).
+- **Python 3.11+** and **Node.js 22+** (`uipath` Python CLI ≥ 2.11, `uip` Node CLI for skills).
+- A **Google API key** (Gemini).
+- A reachable **Primero/SWIMS** backend at `/api/v2` + service-account credentials.
+- **nginx** fronting the gateway's login/bridge server publicly (see [Operations](#operations)).
 
 ---
 
-## Setup
+## Configuration
+
+Config lives in **`.env`** (repo root — read by both the agent locally and the gateway) and
+**`.env.uipath`** (UiPath PAT for the Python CLI / REST). Copy the templates and fill them in:
 
 ```bash
-# 1. CLIs (two of them — see IMPLEMENTATION-GUIDE.md §1)
-npm install -g @uipath/cli            # Node `uip` CLI
-uip skills install --agent claude     # install UiPath skills into Claude Code
-
-python3 -m venv .venv && source .venv/bin/activate
-pip install uipath uipath-langchain langchain-google-genai   # Python `uipath` CLI + SDK
-
-# 2. Configure
-cp .env.example .env                  # set GOOGLE_API_KEY, PRIMERO_*, UIPATH_*
-
-# 3. Authenticate to your tenant
-uipath auth                           # coded-agent path (browser OAuth)
-uip login                             # uip CLI path
-
-# 4. Build & test the coded agent locally (no tenant needed)
-cd agent
-uipath init
-uipath run agent '{"message":"A 12-year-old boy is working in a mine in Tarkwa"}'
-
-# 5. Deploy (when the tenant is ready)
-uipath pack && uipath publish         # coded agent -> Orchestrator
-# then author the Maestro Case + API Workflows in Studio Web (see IMPLEMENTATION-GUIDE.md §4)
-
-# 6. Prepare the WhatsApp adapter after the UiPath API trigger exists
-cd ../whatsapp-gateway
-npm install
-cp .env.example .env                  # set UiPath OAuth + API-trigger endpoint
-npm start                             # scan state/wa-qr.png from +233256590242
+cp .env.example .env                  # GOOGLE_API_KEY, PRIMERO_*, UIPATH_*, SWIMS_BRIDGE_*
+# .env.uipath holds the user-context PAT used by `uipath` CLI + admin REST (gitignored)
 ```
 
-Full step-by-step (tenant setup, connector import, Maestro Case authoring, Action App, governance): **[IMPLEMENTATION-GUIDE.md](IMPLEMENTATION-GUIDE.md)**.
+In the **tenant**, the agent reads its settings from **Orchestrator assets** in folder `Shared`
+(not from `.env`). Create these once:
+
+| Asset | Type | Example |
+|---|---|---|
+| `SWIMS_GOOGLE_API_KEY` | Secret | *(your Gemini key)* |
+| `SWIMS_GEMINI_MODEL` | Text | `gemini-2.5-pro` |
+| `SWIMS_PRIMERO_API_BASE_URL` | Text | `https://swims.ownaradio.com/api/v2` |
+| `SWIMS_PRIMERO_ANON_USERNAME` / `_PASSWORD` | Secret | `primero_cp` / *(pwd)* |
+| `SWIMS_PRIMERO_DEFAULT_OWNER` | Text | `swims_dsw_western` |
+| `SWIMS_BRIDGE_URL` | Text | `https://swims.ownaradio.com/login/session-context` |
+| `SWIMS_BRIDGE_SECRET` | Text/Secret | *(matches `SWIMS_BRIDGE_SECRET` in `.env`)* |
+
+> Secrets never live in the repo (`.env*` are gitignored). The anonymous account `primero_cp` has
+> a create-only role (it **cannot close** cases — closing requires a worker/manager).
+
+---
+
+## Deploy (coded agent → Orchestrator)
+
+```bash
+python3 -m venv .venv
+./.venv/bin/pip install uipath uipath-langchain langchain-google-genai requests python-dotenv
+
+cd agent
+# bump the version in pyproject.toml first (e.g. 0.1.12 → 0.1.13)
+set -a && . ../.env.uipath && set +a          # UiPath auth for the Python CLI
+../.venv/bin/uipath pack                       # build the .nupkg (.uipath/)
+../.venv/bin/uipath publish --tenant           # publish to the tenant feed
+```
+
+Publishing adds the package version; point the **process/release** at it
+(Orchestrator → Processes → *swims-connect-agent* → update to the new version, or via the
+`UpdateToLatestPackageVersion` OData action). The gateway re-resolves the release within ~60 s and
+starts new conversations on the new version automatically.
+
+---
+
+## Start (WhatsApp gateway)
+
+```bash
+cd whatsapp-gateway
+npm install
+
+# foreground (first run prints a QR — scan it from WhatsApp on +233256590242):
+node src/index.js
+
+# detached (survives the shell), logging to state/gateway.log:
+setsid bash -c 'exec node src/index.js >> state/gateway.log 2>&1' < /dev/null &
+pgrep -f "node src/index.js" > state/gateway.pid
+```
+
+- Pairing creds persist in `state/auth/` (no re-scan on restart). QR (if needed) → `state/wa-qr.png`.
+- Worker-login + bridge server listens on `127.0.0.1:18794`; health: `https://swims.ownaradio.com/health`.
+- Restart = stop the PID in `state/gateway.pid`, then run the detached command again.
+
+---
+
+## Run & test
+
+```bash
+# Agent locally (no tenant; hits Primero directly) — anonymous intake:
+./.venv/bin/python agent/run_local.py "A 12-year-old boy is working in a mine in Tarkwa."
+
+# Gateway unit tests:
+cd whatsapp-gateway && npm test
+
+# Cloud end-to-end (drives the DEPLOYED agent through the conversational SDK):
+node scripts/e2e_conversation.mjs    # anonymous report → real Case ID
+node scripts/e2e_image_case.mjs      # image → vision → case + attached photo
+node scripts/worker_bridge_e2e.mjs   # worker login → role-scoped case list + details (auth bridge)
+```
+
+---
+
+## Operations
+
+**nginx** (host `swims.ownaradio.com`, TLS via certbot) routes:
+
+| Path | Upstream | Purpose |
+|---|---|---|
+| `/login/`, `/login`, `/login/session-context`, `/health` | `127.0.0.1:18794` | gateway login server + auth-context resolver |
+| `/` (everything else) | `127.0.0.1:3000` | Primero/SWIMS API |
+
+- Gateway logs: `whatsapp-gateway/state/gateway.log`. Live PID: `state/gateway.pid`.
+- Inspect tenant jobs/assets/traces with the PAT (`.env.uipath`) against
+  `https://staging.uipath.com/{org}/DefaultTenant/orchestrator_` (header `X-UIPATH-OrganizationUnitId: <folderId>`).
 
 ---
 
 ## Repository layout
 
 ```
-agent/          Python LangGraph coded agent (Gemini): graph, prompts, tools, ported Primero helpers
-whatsapp-gateway/ Transport-only Baileys adapter for +233256590242 → UiPath API trigger
-SWIMSChildProtectionCase/ UiPath solution and Maestro Case project
-api-workflows/  API Workflow definitions (one per Primero operation)
-connector/      Primero Integration Service connector (OpenAPI spec + config)
-maestro/        Maestro Case model export (stages, tasks, criteria)
-action-app/     Action Center / Action App definitions (HITL)
-reports/        Ported scheduled-report templates
-docs/           Architecture, source inventory, UiPath research, and coding-agent evidence
-PORTING-PLAN.md · IMPLEMENTATION-GUIDE.md · ARCHITECTURE.md · SUBMISSION.md
+agent/                     Python LangGraph conversational coded agent (Gemini)
+  graph.py                 entrypoint + auth node (resolves the bridge token → worker session)
+  tools.py                 create_case / get_case / list_cases / lifecycle tools (InjectedState)
+  primero.py               Primero REST client (Devise auth, CSRF, case-id resolution)
+  prompts.py concerns.py collation.py   prompt, concern vocabulary, service directory
+  run_local.py             local harness (no UiPath runtime)
+whatsapp-gateway/          Node Baileys adapter + login/bridge server
+  src/index.js             message loop + routing + media + attachment
+  src/uipath-client.js     conversational SDK driver + bridge-token minting
+  src/auth-server.js       login link UI + POST /login/session-context resolver
+  src/bridge.js            HMAC token mint/verify + anti-spoof strip
+  src/primero-client.js    gateway-side Primero client + SessionManager (anon/worker/owner)
+  scripts/*.mjs            end-to-end test harnesses
+SWIMSChildProtectionCase/  UiPath Maestro Case project (caseplan + WhatsAppConversation flow) — scaffolded
+docs/                      architecture, lifecycle contracts, source inventory, Claude Code evidence
+sdd.md · ARCHITECTURE.md · IMPLEMENTATION-GUIDE.md · SUBMISSION.md
 ```
 
 ---
 
 ## Built with Claude Code
 
-This solution was designed and built using the **Claude Code** coding agent together with the official **UiPath skills catalog** (22 skills installed as the `uipath@uipath-marketplace` Claude Code plugin):
+Designed and built with the **Claude Code** coding agent + the official **UiPath skills catalog**:
 
 ```bash
-uip skills install --agent claude     # → 22 skills installed; claude plugin list → uipath@uipath-marketplace ✔ enabled
+uip skills install --agent claude
 ```
 
-The coding agent scaffolded the Python LangGraph agent, drafted the API Workflow contracts, and assists with the Maestro Case model and deployment. The full evidence trail — install output, per-session log of what the agent produced, and the screenshots/prompt-log checklist for the AgentHack coding-agent bonus — is in **[docs/BUILT-WITH-CLAUDE-CODE.md](docs/BUILT-WITH-CLAUDE-CODE.md)**.
-
----
+Evidence trail: [docs/BUILT-WITH-CLAUDE-CODE.md](docs/BUILT-WITH-CLAUDE-CODE.md).
 
 ## Security & privacy
 
-Handles child-protection data and minors. Secrets (Gemini key, Primero creds) live only in **Orchestrator Credential/Secret assets**, never in the repo. LLM traffic runs under the **AI Trust Layer** (PII masking, guardrails). Reports can be anonymous; case closure is least-privilege (manager approval in Action Center). No secrets are committed (`.env` is git-ignored).
+Handles child-protection data about minors. Secrets (Gemini key, Primero creds, bridge secret)
+live only in Orchestrator assets / gitignored `.env*`. The worker's SWIMS password never reaches
+the LLM — only an opaque, short-TTL, sender-bound token does, and it is stripped before the model
+sees it. Reports can be anonymous; case actions run as the signed-in worker so **Primero enforces
+least-privilege** (e.g. closure needs a manager).
 
 ## License
 

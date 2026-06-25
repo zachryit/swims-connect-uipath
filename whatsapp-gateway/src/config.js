@@ -29,6 +29,9 @@ export function loadConfig() {
     uipathSurfaceVersion: process.env.UIPATH_SURFACE_VERSION || "0.1.0",
     agentReleaseTtlMs: Number(process.env.UIPATH_AGENT_RELEASE_TTL_MS || 60 * 1000),
     conversationIdleTtlMs: Number(process.env.UIPATH_CONVERSATION_IDLE_TTL_MS || 25 * 60 * 1000),
+    // Recycle the shared conversational SDK/socket before CAS auth/socket goes stale
+    // (stale connection surfaces as CLIENT_MESSAGE_DISPATCH_FAILED on the next turn).
+    connectionMaxAgeMs: Number(process.env.UIPATH_CONNECTION_MAX_AGE_MS || 20 * 60 * 1000),
     turnTimeoutMs: Number(process.env.AGENT_TURN_TIMEOUT_MS || 75000),
     historyTurns: Number(process.env.HISTORY_TURNS || 20),
 
@@ -46,6 +49,12 @@ export function loadConfig() {
     primeroOwnerUsername: process.env.PRIMERO_OWNER_USERNAME || process.env.PRIMERO_WORKER_USERNAME || process.env.PRIMERO_DEFAULT_OWNER || "",
     primeroOwnerPassword: process.env.PRIMERO_OWNER_PASSWORD || process.env.PRIMERO_WORKER_PASSWORD || "",
     primeroTimeoutMs: Number(process.env.PRIMERO_TIMEOUT_MS || 60000),
+
+    // Worker auth-context bridge: an opaque short-lived token carries the logged-in worker's
+    // identity into the conversational agent (which can't receive a session any other way).
+    // The agent exchanges the token for the worker's Primero session via the resolver endpoint.
+    bridgeSecret: process.env.SWIMS_BRIDGE_SECRET || "",
+    bridgeTokenTtlMs: Number(process.env.SWIMS_BRIDGE_TOKEN_TTL_MS || 5 * 60 * 1000),
 
     googleApiKey: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "",
     transcribeModel: process.env.GEMINI_TRANSCRIBE_MODEL || process.env.GEMINI_MODEL || "gemini-3.1-pro-preview",

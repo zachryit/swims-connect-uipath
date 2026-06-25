@@ -2,7 +2,12 @@
 
 **UiPath AgentHack · Track 1 (Maestro Case) · Deadline 2026-06-29 23:45 EDT (≈8 days)**
 
-This is the build playbook: environment setup, the exact CLI lifecycle, code skeletons for the coded agent and API Workflows, the Maestro Case model, and a day-by-day schedule built around the **biggest constraint — the UiPath Labs tenant takes 3–5 business days to arrive.** Read `PORTING-PLAN.md` first for the component mapping; this guide is *how to build it*.
+This is the original build **playbook/plan**. For the **current, working** deploy / start / run /
+test steps and what's actually built, use **[README.md](README.md)** (the source of truth) — it
+reflects the shipped conversational coded agent + WhatsApp gateway + worker auth-context bridge.
+This guide still describes the broader target build (API Workflows, Maestro Case, Action Center)
+and the day-by-day schedule. (Note: the model is now `gemini-2.5-pro` via the `SWIMS_GEMINI_MODEL`
+asset, not `gemini-3.1-pro-preview`.) Read `PORTING-PLAN.md` first for the component mapping.
 
 > Items marked **⚠ VERIFY** are not fully confirmed from docs and must be checked in your own tenant before you depend on them. Sources for every UiPath claim are in `docs/UIPATH-REFERENCE.md`.
 

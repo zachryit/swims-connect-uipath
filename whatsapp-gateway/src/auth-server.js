@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { verifyBridgeToken } from "./bridge.js";
 
 const esc = (value) => String(value).replace(/[&<>\"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[c]));
 const safe = (sender) => String(sender).replace(/^\+/, "").replace(/[^a-zA-Z0-9_.:-]/g, "_");
@@ -46,6 +47,26 @@ export class LoginService {
       const token = url.pathname.slice(7); const pending = this.#pending(token);
       if (!pending) return res.writeHead(410, { "Content-Type": "text/plain" }).end("This login link is invalid or expired.");
       return res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }).end(this.#page(token));
+    }
+    // Worker auth-context bridge resolver: the agent exchanges an opaque token for the
+    // logged-in worker's Primero session. Protected by a shared secret AND the token's own
+    // HMAC (sender-bound, short-TTL). Returns the freshest session (silent re-login if expired).
+    if (req.method === "POST" && url.pathname === "/login/session-context") {
+      const secret = this.config.bridgeSecret;
+      if (!secret || req.headers["x-bridge-auth"] !== secret) {
+        return res.writeHead(403, { "Content-Type": "application/json" }).end('{"error":"forbidden"}');
+      }
+      let raw = ""; for await (const chunk of req) { raw += chunk; if (raw.length > 8192) throw new Error("Body too large"); }
+      let token = "";
+      try { token = (JSON.parse(raw || "{}").token) || ""; } catch {}
+      const claim = verifyBridgeToken(token, secret);
+      if (!claim) return res.writeHead(401, { "Content-Type": "application/json" }).end('{"error":"invalid_or_expired_token"}');
+      const worker = await this.sessions.worker(claim.sender);
+      if (!worker) return res.writeHead(404, { "Content-Type": "application/json" }).end('{"error":"no_worker_session"}');
+      this.logger.info({ sender: claim.sender, user: worker.user?.user_name || worker.user?.data?.user_name }, "Resolved worker auth context for agent");
+      return res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" })
+        .end(JSON.stringify({ cookie: worker.cookie, csrf: worker.csrf, sender: claim.sender,
+          user: worker.user?.user_name || worker.user?.data?.user_name || null }));
     }
     if (req.method === "POST" && url.pathname === "/login") {
       let raw = ""; for await (const chunk of req) { raw += chunk; if (raw.length > 16_384) throw new Error("Form too large"); }

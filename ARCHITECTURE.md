@@ -1,6 +1,15 @@
 # SWIMS-Connect on UiPath — Architecture
 
-A UiPath-native re-architecture of **SWIMS-Connect**, an AI assistant for Ghana child-protection case management. **UiPath Maestro** orchestrates the case lifecycle across AI agents, API integrations, and people; a **Python LangGraph coded agent** running **Google Gemini 3.1 Pro** handles conversational intake and field extraction; **API Workflows** (over an Integration Service connector) drive the **Primero/SWIMS** REST backend; **Action Center** keeps humans in charge at decision points; and the **AI Trust Layer** + Orchestrator provide governance.
+> **Status:** this is the **target** architecture (north star). For **what is actually built and
+> verified today** — and how to deploy/start/run it — see **[README.md](README.md)** §"Status" and
+> **[docs/WHATSAPP-UIPATH-ARCHITECTURE.md](docs/WHATSAPP-UIPATH-ARCHITECTURE.md)**.
+> Live deltas vs. this diagram: the coded agent is **conversational** and calls Primero **directly**
+> (API Workflows/connector are the planned next step, not yet wired); the **Maestro Case + Action
+> Center** lifecycle is **scaffolded** (`SWIMSChildProtectionCase/`), not yet driving the live flow;
+> the model is configurable via the `SWIMS_GEMINI_MODEL` asset (**currently `gemini-2.5-pro`**); and
+> per-worker Primero auth **is** used (via the auth-context bridge) — see decision #3 below.
+
+A UiPath-native re-architecture of **SWIMS-Connect**, an AI assistant for Ghana child-protection case management. **UiPath Maestro** orchestrates the case lifecycle across AI agents, API integrations, and people; a **Python LangGraph coded agent** running **Google Gemini** handles conversational intake and field extraction; **API Workflows** (over an Integration Service connector) drive the **Primero/SWIMS** REST backend; **Action Center** keeps humans in charge at decision points; and the **AI Trust Layer** + Orchestrator provide governance.
 
 ```
         Community reporter (anonymous)        Field worker / Manager
@@ -69,7 +78,12 @@ A UiPath-native re-architecture of **SWIMS-Connect**, an AI assistant for Ghana 
 
 1. **Orchestration leaves the prompt.** In the source, the LLM drives the whole workflow. Here, **Maestro owns the lifecycle/handoffs/SLAs** and the agent is one actor it invokes — the pattern Track 1 rewards.
 2. **Writes are deterministic.** A real `case_id_display` only ever comes from the `case_create` **API Workflow** and flows back as a Maestro variable, so the LLM cannot fabricate one (the source enforced this with a prompt+gateway guard; UiPath makes it structural).
-3. **Auth is platform-managed.** No per-chat worker login or hand-rolled AES creds: a service identity (Orchestrator Secret) calls Primero, and "worker" vs "manager" authority is modeled as **Action Center assignees + Maestro stage permissions** — the human approving *is* the authenticated authority.
+3. **Auth keeps Primero as the authority (as built).** Each worker signs in to **their own Primero
+   account** via a one-time HTTPS link; their session is carried into the conversational agent by the
+   **auth-context bridge** (opaque token → resolver → graph state), so every action runs as that user
+   and **Primero enforces their real role** (anonymous reports use the restricted `primero_cp` service
+   account). *(Original target: model worker/manager authority purely as Action Center assignees +
+   Maestro stage permissions — still the plan for the lifecycle/closure-approval steps.)*
 4. **Gemini via BYO-key** (`ChatGoogleGenerativeAI` + `GOOGLE_API_KEY` secret) — the documented, de-risked path (UiPath LLM-Gateway selection of Gemini from the SDK is unverified).
 5. **Built by a coding agent (Claude Code)** via `uip skills install --agent claude` — both an efficiency choice and a scored bonus.
 

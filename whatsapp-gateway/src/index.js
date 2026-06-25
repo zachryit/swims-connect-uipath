@@ -78,14 +78,11 @@ async function userFacingTurnError(sender, error) {
     return ensureLoginLinkForWorkerPrompt(sender, "To check case information, you need to be a signed-in SWIMS worker. Please sign in to continue.");
   }
   if (/timed out|timeout|UIPATH_TURN_TIMEOUT/i.test(message)) {
-    return "SWIMS Connect did not receive a response from UiPath in time. Please try again. If this is about case information or reports, send “login” first.";
+    return "Sorry, that took longer than expected and didn't go through. Please send it again.";
   }
-  const safe = message
-    .replace(/\s+/g, " ")
-    .replace(/\/tmp\/\S+/g, "[agent path]")
-    .slice(0, 180)
-    .trim();
-  return `SWIMS Connect hit an agent error while processing that message${safe ? `: ${safe}` : "."}\n\nPlease try again. If this is about case information or reports, send “login” first.`;
+  // Never surface raw technical details (agent/folder keys, error codes, stack traces) to users.
+  // The full error is logged server-side for debugging; users get a calm, friendly message.
+  return "Sorry, something went wrong on my side and I couldn't process that just now. Please try again in a moment.";
 }
 
 async function prepareTurn(socket, message, inbound) {

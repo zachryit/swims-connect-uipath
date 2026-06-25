@@ -4,7 +4,9 @@
 **Track:** **Track 1 — UiPath Maestro Case**
 **Deadline:** 2026-06-29 23:45 EDT · **Team size:** 1–4 · **Pool:** $50,000
 
-This file maps the build to the judging rubric and bonuses, and tracks the required deliverables. Build details are in `IMPLEMENTATION-GUIDE.md`.
+This file maps the build to the judging rubric and bonuses, and tracks the required deliverables.
+For what is actually built/verified and how to deploy/start/run it, see **[README.md](README.md)**;
+build details are in `IMPLEMENTATION-GUIDE.md`.
 
 ---
 
