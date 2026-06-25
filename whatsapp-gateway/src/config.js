@@ -40,6 +40,11 @@ export function loadConfig() {
     primeroBaseUrl: (process.env.PRIMERO_API_BASE_URL || process.env.SWIMS_API_BASE_URL || "http://127.0.0.1:3000/api/v2").replace(/\/$/, ""),
     primeroAnonUsername: process.env.PRIMERO_ANON_USERNAME || process.env.SWIMS_ANONYMOUS_USERNAME || "",
     primeroAnonPassword: process.env.PRIMERO_ANON_PASSWORD || process.env.SWIMS_ANONYMOUS_PASSWORD || "",
+    // The worker that OWNS anonymous reports (PRIMERO_DEFAULT_OWNER in the agent). Anonymous
+    // cases are owned_by this worker, so attachments must be written as this account — the
+    // anon service account loses access once ownership is routed away (403 Forbidden).
+    primeroOwnerUsername: process.env.PRIMERO_OWNER_USERNAME || process.env.PRIMERO_WORKER_USERNAME || process.env.PRIMERO_DEFAULT_OWNER || "",
+    primeroOwnerPassword: process.env.PRIMERO_OWNER_PASSWORD || process.env.PRIMERO_WORKER_PASSWORD || "",
     primeroTimeoutMs: Number(process.env.PRIMERO_TIMEOUT_MS || 60000),
 
     googleApiKey: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "",

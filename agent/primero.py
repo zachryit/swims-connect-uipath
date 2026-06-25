@@ -147,45 +147,100 @@ class PrimeroClient:
         self.s = requests.Session()
         self.s.headers.update({"Accept": "application/json"})
         self._user: dict | None = None
+        # Freshest CSRF token the server issued, tracked in RESPONSE order (see _capture_csrf).
+        self._csrf_token: str | None = None
+        # Creds held after a login() so a CSRF/session failure can transparently re-auth.
+        self._creds: tuple[str, str] | None = None
+
+    def _capture_csrf(self, resp: requests.Response) -> requests.Response:
+        """Record the freshest CSRF token the server issued, in RESPONSE order.
+
+        Primero/Rails RESETS the session and ROTATES the CSRF-TOKEN on login (POST /tokens),
+        so the X-CSRF-Token sent on a later POST must be the post-login token — a stale one
+        yields `403 ActionController::InvalidAuthenticityToken`. The cookiejar can retain
+        stale/duplicate CSRF-TOKEN entries whose *iteration order* is not stable across
+        requests/urllib3/Python versions, so the header must NOT be derived from jar order.
+        Response order is deterministic, so we take the token from each response's Set-Cookie."""
+        for r in [*resp.history, resp]:
+            raw = None
+            try:
+                raw = r.cookies.get("CSRF-TOKEN")
+            except Exception:  # CookieConflictError (same name, different scope)
+                for ck in r.cookies:
+                    if ck.name == "CSRF-TOKEN":
+                        raw = ck.value
+            if raw:
+                self._csrf_token = unquote(raw)
+        return resp
 
     def _csrf(self) -> str | None:
-        # Tolerate duplicate CSRF-TOKEN cookies (injected + server-refreshed); take the latest.
+        if self._csrf_token:
+            return self._csrf_token
+        # Fallback for clients built from an injected session (no login round-trip).
         raw = None
         for ck in self.s.cookies:
             if ck.name == "CSRF-TOKEN":
                 raw = ck.value
-        return unquote(raw) if raw else None
+        if raw:
+            self._csrf_token = unquote(raw)
+        return self._csrf_token
+
+    @staticmethod
+    def _is_csrf_error(resp: requests.Response) -> bool:
+        if resp.status_code != 403:
+            return False
+        try:
+            return "InvalidAuthenticityToken" in resp.text
+        except Exception:
+            return False
 
     def login(self, username: str, password: str) -> dict:
         """3-step native Devise login. Returns the SWIMS user object on success."""
         if not username or not password:
             raise RuntimeError("Primero login requires a username and password")
         # 1: preflight GET seeds CSRF + session cookies
-        self.s.get(f"{self.base}/identity_providers", timeout=TIMEOUT)
+        self._capture_csrf(self.s.get(f"{self.base}/identity_providers", timeout=TIMEOUT))
         csrf = self._csrf()
         if not csrf:
             raise RuntimeError("Could not obtain CSRF token from Primero")
-        # 2: POST /tokens
-        r = self.s.post(
+        # 2: POST /tokens (also rotates the session + CSRF-TOKEN — captured for later POSTs)
+        r = self._capture_csrf(self.s.post(
             f"{self.base}/tokens",
             headers={"X-CSRF-Token": csrf},
             json={"user": {"user_name": username, "password": password}},
             timeout=TIMEOUT,
-        )
+        ))
         if r.status_code != 200:
             raise RuntimeError(f"Primero login failed (HTTP {r.status_code}): {r.text[:300]}")
         self._user = r.json()
-        # 3: refresh CSRF for the post-login session
-        self.s.get(f"{self.base}/identity_providers", timeout=TIMEOUT)
+        self._creds = (username, password)
+        # 3: refresh CSRF for the post-login (rotated) session
+        self._capture_csrf(self.s.get(f"{self.base}/identity_providers", timeout=TIMEOUT))
         return self._user
 
-    def request(self, method: str, path: str, params: dict | None = None, json: dict | None = None) -> requests.Response:
+    def _send(self, method: str, path: str, params: dict | None = None, json: dict | None = None) -> requests.Response:
         headers = {}
         if method.upper() not in ("GET", "HEAD"):
             csrf = self._csrf()
             if csrf:
                 headers["X-CSRF-Token"] = csrf
-        return self.s.request(method, f"{self.base}{path}", params=params, json=json, headers=headers, timeout=TIMEOUT)
+        return self._capture_csrf(
+            self.s.request(method, f"{self.base}{path}", params=params, json=json, headers=headers, timeout=TIMEOUT))
+
+    def request(self, method: str, path: str, params: dict | None = None, json: dict | None = None) -> requests.Response:
+        resp = self._send(method, path, params=params, json=json)
+        # A stale X-CSRF-Token (cookiejar ordering differences across runtimes, or a session
+        # that expired/rotated in a long-lived hosted process) yields 403 InvalidAuthenticityToken.
+        # Refresh the token on the current session and retry once; if the session itself is gone
+        # and we hold creds, re-login and retry. Idempotent for the GET-refresh; create_case is
+        # only reached once per turn so a single retry cannot double-file.
+        if method.upper() not in ("GET", "HEAD") and self._is_csrf_error(resp):
+            self._capture_csrf(self.s.get(f"{self.base}/identity_providers", timeout=TIMEOUT))
+            resp = self._send(method, path, params=params, json=json)
+            if self._is_csrf_error(resp) and self._creds:
+                self.login(*self._creds)
+                resp = self._send(method, path, params=params, json=json)
+        return resp
 
     # ── high-level operations (mirror the source tools) ──
     def create_case(self, report: dict) -> dict:
@@ -415,7 +470,9 @@ def client_from_session(cookie: str, csrf: str) -> PrimeroClient:
         if name and value:
             c.s.cookies.set(name, value, domain=host)
     if csrf:
-        # request() reads CSRF-TOKEN via _csrf()=unquote(raw) for the X-CSRF-Token header.
+        # Seed the tracked token directly (the gateway passes the decoded CSRF) so the first
+        # write uses it without relying on jar order; later responses refresh it via _capture_csrf.
+        c._csrf_token = csrf
         # Domain-scope it so a server-refreshed CSRF-TOKEN updates (not duplicates) this entry.
         c.s.cookies.set("CSRF-TOKEN", csrf, domain=host)
     return c

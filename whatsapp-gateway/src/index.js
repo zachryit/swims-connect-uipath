@@ -61,8 +61,12 @@ function shouldAttachMediaToNextCase(media, analysis, inbound) {
 
 async function ensureLoginLinkForWorkerPrompt(sender, reply) {
   const text = String(reply || "");
-  if (await sessionManager.worker(sender)) return text;
-  const asksForLogin = /\b(sign(?:ed)?[- ]?in|log(?:ged)?[- ]?in|worker authentication|swims worker)\b/i.test(text);
+  // If the reply tells the user to sign in, it MUST carry a login link — always. (We used to
+  // skip this when sessionManager.worker(sender) looked truthy, but a stale/half-valid saved
+  // session made the gateway think the user was logged in while the agent still asked them to
+  // sign in → "please sign in" with no link and no way forward. The ask-to-sign-in text is the
+  // signal that a link is needed, regardless of any saved session.)
+  const asksForLogin = /\b(sign(?:ed)?[- ]?in|log(?:ged)?[- ]?in|worker authentication|swims worker|registered swims worker)\b/i.test(text);
   const alreadyHasLink = /\bhttps?:\/\/|wa\.me\//i.test(text);
   if (!asksForLogin || alreadyHasLink) return text;
   return `${text.trim()}\n\n${loginService.createLink(sender, "login")}`;
@@ -139,8 +143,11 @@ async function routeTurn(socket, message, rawInbound) {
   updated.pendingConsent = /is it OK to contact you for follow-up\?/i.test(result.reply);
 
   if (result.swimsCaseId) {
+    // Attach media as an account that can WRITE the case. A logged-in reporter-worker owns
+    // their own cases; anonymous reports are owned_by the default-owner worker, so attach as
+    // that worker (the anon service account loses access once ownership is routed away → 403).
     const worker = await sessionManager.worker(inbound.sender);
-    const session = worker || await sessionManager.anonymous();
+    const session = worker || await sessionManager.defaultOwner() || await sessionManager.anonymous();
     const failures = [];
     for (const media of updated.pendingMedia || []) {
       try { await attachMedia({ media, caseId: result.swimsCaseId, session, primero: sessionManager.client }); }

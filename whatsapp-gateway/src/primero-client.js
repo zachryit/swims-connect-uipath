@@ -52,7 +52,7 @@ export class PrimeroClient {
 
 export class SessionManager {
   constructor(config, store) {
-    this.config = config; this.store = store; this.client = new PrimeroClient(config); this.anon = null;
+    this.config = config; this.store = store; this.client = new PrimeroClient(config); this.anon = null; this.owner = null;
   }
 
   async anonymous() {
@@ -63,6 +63,19 @@ export class SessionManager {
     }
     this.anon = await this.client.login(this.config.primeroAnonUsername, this.config.primeroAnonPassword);
     return this.anon;
+  }
+
+  // The worker that owns anonymous reports — the only account that can write attachments to
+  // them (Primero scopes record access to the owner/assignee). Returns null if not configured
+  // so callers can fall back to the anon account in local dev.
+  async defaultOwner() {
+    if (!this.config.primeroOwnerUsername || !this.config.primeroOwnerPassword) return null;
+    if (this.owner) {
+      const check = await this.client.validate(this.owner);
+      if (check.ok) return this.owner;
+    }
+    this.owner = await this.client.login(this.config.primeroOwnerUsername, this.config.primeroOwnerPassword);
+    return this.owner;
   }
 
   async worker(sender) {

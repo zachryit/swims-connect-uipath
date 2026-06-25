@@ -111,7 +111,15 @@ export class UiPathConversationClient {
     const result = await this.#invokeConversational(inbound, payload, worker);
 
     if (result.error) throw new Error(result.error);
-    const reply = (result.reply || "").trim() || "Sorry, I couldn't process that. Please try again.";
+    // An empty turn is not an error — the agent occasionally completes an exchange without
+    // emitting text. Don't show an alarming "couldn't process" message: confirm the case if one
+    // was filed, otherwise ask the user to resend.
+    let reply = (result.reply || "").trim();
+    if (!reply) {
+      reply = result.swimsCaseId
+        ? `Thank you. Your report has been filed. The SWIMS Case ID is ${result.caseIdDisplay || result.swimsCaseId}. A caseworker will review it and follow up.`
+        : "Sorry, I didn't quite catch that — please send it again.";
+    }
     hist.push({ role: "assistant", content: reply });
     state.history = hist.slice(-this.config.historyTurns);
     this.stateStore.save(sender, state);
