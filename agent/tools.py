@@ -4,6 +4,7 @@ primero.py; in the UiPath tenant the same operations are invoked as API Workflow
 """
 from __future__ import annotations
 import contextvars
+import os
 from typing import Annotated
 
 from langchain_core.tools import tool
@@ -181,6 +182,100 @@ def list_cases(per: int = 10, status: str = "", risk_level: str = "",
 
 
 @tool
+def run_report(report_type: str, concern: str = "", status: str = "", limit: int = 10,
+               state: Annotated[dict, InjectedState] = None) -> dict:
+    """Generate a SWIMS caseload report for the signed-in worker (Primero scopes it to their role:
+    a worker sees their own cases, a supervisor/manager sees their group/all).
+
+    `report_type` is one of: high-risk, overdue-tasks, tasks-due-today, pending-referrals,
+    overdue-followups, upcoming-followups, stale-cases, new-cases, workflow-summary,
+    concern-summary, caseload-summary, supervisor-daily, manager-weekly.
+    Map plain language: "referrals not delivered yet"/"pending referrals" -> pending-referrals;
+    "what's on my plate today" -> tasks-due-today; "overdue tasks" -> overdue-tasks; "high-risk
+    cases" -> high-risk; "workflow/pipeline/by stage" -> workflow-summary; "breakdown by concern"/
+    "how many <concern> cases" -> concern-summary; "supervisor report" -> supervisor-daily;
+    "manager report" -> manager-weekly. Optional `concern` filters to one protection concern
+    (e.g. "child labour"); `status` is open|closed.
+
+    Returns ready-to-send text in `report` — relay it to the user VERBATIM (keep the Case IDs and
+    numbers exactly as written; do not reformat or invent them)."""
+    if not _has_acting(state):
+        return _needs_login("case reports")
+    import reports as _reports
+    text = _reports.generate_report(_acting(state), report_type, concern=concern or None,
+                                    status=status or None, limit=limit or 10)
+    return {"ok": True, "report": text}
+
+
+@tool
+def list_report_types() -> dict:
+    """List the report types this assistant can generate for a signed-in SWIMS worker. Use this to
+    answer 'what reports can you generate / give me?'."""
+    import reports as _reports
+    return {"ok": True, "reports": _reports.available_reports()}
+
+
+# ── scheduled reports (recurring WhatsApp delivery, run by the gateway) ──────
+def _schedules_endpoint() -> str:
+    base = os.environ.get("SWIMS_BRIDGE_URL") or ""
+    if base.endswith("/session-context"):
+        return base[: -len("/session-context")] + "/schedules"
+    return os.environ.get("SWIMS_SCHEDULE_URL") or ""
+
+
+def _call_schedules(payload: dict) -> dict:
+    url, secret = _schedules_endpoint(), os.environ.get("SWIMS_BRIDGE_SECRET")
+    if not (url and secret):
+        return {"ok": False, "message": "Scheduled reports aren't configured right now."}
+    try:
+        import requests
+        r = requests.post(url, headers={"X-Bridge-Auth": secret, "Content-Type": "application/json"},
+                          json=payload, timeout=20)
+        if r.headers.get("content-type", "").startswith("application/json"):
+            return r.json()
+        return {"ok": False, "message": f"Scheduler returned HTTP {r.status_code}."}
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not reach the report scheduler: {exc}"}
+
+
+@tool
+def schedule_report(report_type: str, frequency: str = "daily", time: str = "08:00",
+                    day_of_week: str = "", concern: str = "",
+                    state: Annotated[dict, InjectedState] = None) -> dict:
+    """Set up a recurring SWIMS report delivered to this worker over WhatsApp. `report_type` is a
+    run_report type (e.g. pending-referrals, overdue-tasks, high-risk, workflow-summary,
+    supervisor-daily, manager-weekly). `frequency` is daily|weekly|every-n-days; `time` is 24h
+    HH:MM (Africa/Accra). For weekly, pass `day_of_week` (e.g. monday). Optional `concern` scopes
+    to one protection concern. e.g. "every morning at 8" -> frequency=daily, time=08:00;
+    "every Monday at 9am" -> frequency=weekly, day_of_week=monday, time=09:00."""
+    if not _has_acting(state):
+        return _needs_login("scheduled reports")
+    sender = _channel(state).get("sender")
+    if not sender:
+        return {"ok": False, "message": "I couldn't identify your WhatsApp number to schedule this."}
+    return _call_schedules({"action": "create", "sender": sender, "schedule": {
+        "type": report_type, "frequency": frequency, "time": time,
+        "day_of_week": day_of_week or None, "concern": concern or None}})
+
+
+@tool
+def list_scheduled_reports(state: Annotated[dict, InjectedState] = None) -> dict:
+    """List the recurring reports this worker is currently subscribed to ('what reports am I getting?')."""
+    if not _has_acting(state):
+        return _needs_login("scheduled reports")
+    return _call_schedules({"action": "list", "sender": _channel(state).get("sender")})
+
+
+@tool
+def cancel_scheduled_report(which: str = "", state: Annotated[dict, InjectedState] = None) -> dict:
+    """Cancel a recurring report. `which` is the report type (e.g. pending-referrals) or its schedule
+    id; omit it to cancel the only schedule when there is exactly one."""
+    if not _has_acting(state):
+        return _needs_login("scheduled reports")
+    return _call_schedules({"action": "delete", "sender": _channel(state).get("sender"), "which": which})
+
+
+@tool
 def find_services(district: str = "", category: str = "", search: str = "") -> dict:
     """Look up real service providers in the Ghana Social Welfare Service Directory (Collation)
     to refer a case to. Filter by district/region, service `category`, or a free `search` term
@@ -274,6 +369,8 @@ def close_case(case_id: str, reason: str = "", notes: str = "",
 
 TOOLS = [
     create_case, get_case, list_cases, find_services,
+    run_report, list_report_types,
+    schedule_report, list_scheduled_reports, cancel_scheduled_report,
     record_assessment, record_case_plan, add_service_referral,
     mark_service_delivered, record_followup, close_case,
 ]

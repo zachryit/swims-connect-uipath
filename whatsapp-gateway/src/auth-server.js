@@ -68,6 +68,24 @@ export class LoginService {
         .end(JSON.stringify({ cookie: worker.cookie, csrf: worker.csrf, sender: claim.sender,
           user: worker.user?.user_name || worker.user?.data?.user_name || null }));
     }
+    // Scheduled reports: the agent's schedule tools call this (secret-gated) to manage a
+    // sender's report schedules. The per-minute runner lives in scheduler.js.
+    if (req.method === "POST" && url.pathname === "/login/schedules") {
+      const secret = this.config.bridgeSecret;
+      if (!secret || req.headers["x-bridge-auth"] !== secret) {
+        return res.writeHead(403, { "Content-Type": "application/json" }).end('{"error":"forbidden"}');
+      }
+      let raw = ""; for await (const chunk of req) { raw += chunk; if (raw.length > 8192) throw new Error("Body too large"); }
+      let body = {};
+      try { body = JSON.parse(raw || "{}"); } catch {}
+      const sender = String(body.sender || "").trim();
+      if (!sender || !this.scheduler) return res.writeHead(400, { "Content-Type": "application/json" }).end('{"error":"bad_request"}');
+      let out;
+      if (body.action === "list") out = this.scheduler.list(sender);
+      else if (body.action === "delete") out = this.scheduler.remove(sender, body.which);
+      else out = this.scheduler.create(sender, body.schedule || body);
+      return res.writeHead(out.ok ? 200 : 400, { "Content-Type": "application/json", "Cache-Control": "no-store" }).end(JSON.stringify(out));
+    }
     if (req.method === "POST" && url.pathname === "/login") {
       let raw = ""; for await (const chunk of req) { raw += chunk; if (raw.length > 16_384) throw new Error("Form too large"); }
       const form = new URLSearchParams(raw); const token = form.get("token") || ""; const pending = this.#pending(token);

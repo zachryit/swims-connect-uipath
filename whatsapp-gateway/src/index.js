@@ -16,6 +16,7 @@ import { deterministicIntent, GREETING, isConsentReply } from "./router.js";
 import { SessionStore } from "./session-store.js";
 import { SenderStateStore } from "./state-store.js";
 import { UiPathConversationClient } from "./uipath-client.js";
+import { ReportScheduler } from "./scheduler.js";
 
 const config = loadConfig();
 const logger = pino({ level: config.logLevel });
@@ -24,6 +25,24 @@ const sessionStore = new SessionStore(config.stateDir, config.credentialKey);
 const sessionManager = new SessionManager(config, sessionStore);
 const loginService = new LoginService(config, sessionManager, logger);
 const client = new UiPathConversationClient(config, logger, stateStore, sessionManager);
+
+// Scheduled reports: a per-minute runner generates due reports by DRIVING THE AGENT (so the same
+// run_report tool serves on-demand and scheduled), then sends them to WhatsApp.
+let currentSocket = null;
+const jidFromSender = (sender) => `${String(sender).replace(/\D/g, "")}@s.whatsapp.net`;
+const scheduler = new ReportScheduler(config, {
+  logger: logger.child({ component: "scheduler" }),
+  workerActive: async (sender) => Boolean(await sessionManager.worker(sender)),
+  generate: async (sender, text) => {
+    const result = await client.turn({ sender, text, messageId: `sched-${Date.now()}`, channel: "whatsapp", messageType: "text" });
+    return result?.reply || null;
+  },
+  send: async (sender, text) => {
+    if (!currentSocket) throw new Error("WhatsApp socket not connected");
+    await currentSocket.sendMessage(jidFromSender(sender), { text });
+  },
+});
+loginService.scheduler = scheduler;
 const handled = new Set();
 const runtime = {
   loginServer: null,
@@ -187,6 +206,8 @@ async function start() {
     if (connection === "open") {
       logger.info("WhatsApp connected; UiPath is the conversation runtime");
       await fs.rm(config.qrPath, { force: true });
+      currentSocket = socket;
+      scheduler.start();
     }
     if (connection === "close") {
       runtime.sockets.delete(socket);
