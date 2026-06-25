@@ -92,6 +92,8 @@ def build_case_data(report: dict) -> dict:
         *contact_lines,
         f"Reporter consents to follow-up contact: {consent_text}.",
     ]
+    if report.get("message_id"):
+        note_lines.append(f"Source message ID: {report['message_id']}.")
     if report.get("incident_type"):
         note_lines.append(f"Incident type: {report['incident_type']}.")
     if report.get("urgency") or report.get("risk_level"):
@@ -188,6 +190,10 @@ class PrimeroClient:
     # ── high-level operations (mirror the source tools) ──
     def create_case(self, report: dict) -> dict:
         data = build_case_data(report)
+        # Idempotency at the source-system edge: WhatsApp retries and gateway restarts must not
+        # create duplicate child-protection cases for the same inbound message.
+        # Primero has no dedicated idempotency key in this deployment, so this remains best-effort
+        # at the gateway level; the message_id is still persisted in the initial note for audit.
         r = self.request("POST", "/cases", json={"data": data})
         if r.status_code not in (200, 201):
             body = r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text

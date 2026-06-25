@@ -24,12 +24,16 @@ export function extractInbound(message) {
   else if (body?.videoMessage) messageType = "video";
   else if (body?.documentMessage) messageType = "document";
 
+  const media = body?.audioMessage || body?.imageMessage || body?.videoMessage || body?.documentMessage;
+
   return {
     channel: "whatsapp",
     sender: normalizeSender(message?.key?.remoteJid),
     messageId: String(message?.key?.id || ""),
     text: String(text).trim(),
     messageType,
+    mimeType: String(media?.mimetype || ""),
+    fileName: String(media?.fileName || ""),
     receivedAt: new Date(Number(message?.messageTimestamp || Date.now() / 1000) * 1000).toISOString()
   };
 }

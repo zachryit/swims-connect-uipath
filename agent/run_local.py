@@ -29,7 +29,7 @@ def main() -> int:
     try:
         out = _invoke(None, msg)
     except Exception as e:  # primary model unavailable → fall back
-        fb = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
+        fb = os.environ.get("GEMINI_FALLBACK_MODEL", os.environ.get("GEMINI_MODEL", "gemini-3.1-pro-preview"))
         print(f"[primary model failed: {e}\n retrying with {fb}]\n")
         out = _invoke(fb, msg)
 

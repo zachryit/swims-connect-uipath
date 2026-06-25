@@ -24,5 +24,6 @@ test("identifies voice notes for the UiPath media path", () => {
     message: { audioMessage: { mimetype: "audio/ogg; codecs=opus" } }
   });
   assert.equal(turn.messageType, "audio");
+  assert.equal(turn.mimeType, "audio/ogg; codecs=opus");
   assert.equal(turn.text, "");
 });

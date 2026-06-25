@@ -33,22 +33,32 @@ def _hydrate_runtime_settings() -> None:
     sdk = UiPath()
     folder_path = os.environ.get("UIPATH_FOLDER_PATH", "Shared")
 
+    def secret(*names: str):
+        for name in names:
+            try:
+                value = sdk.assets.retrieve_secret(name, folder_path=folder_path)
+                if value:
+                    return value
+            except Exception:
+                pass
+        return None
+
+    def text_asset(*names: str):
+        for name in names:
+            try:
+                value = sdk.assets.retrieve(name, folder_path=folder_path).value
+                if value:
+                    return value
+            except Exception:
+                pass
+        return None
+
     values = {
-        "GOOGLE_API_KEY": sdk.assets.retrieve_secret(
-            "SWIMS_GOOGLE_API_KEY", folder_path=folder_path
-        ),
-        "GEMINI_MODEL": sdk.assets.retrieve(
-            "SWIMS_GEMINI_MODEL", folder_path=folder_path
-        ).value,
-        "PRIMERO_API_BASE_URL": sdk.assets.retrieve(
-            "SWIMS_PRIMERO_API_BASE_URL", folder_path=folder_path
-        ).value,
-        "PRIMERO_ANON_USERNAME": sdk.assets.retrieve_secret(
-            "SWIMS_PRIMERO_ANON_USERNAME", folder_path=folder_path
-        ),
-        "PRIMERO_ANON_PASSWORD": sdk.assets.retrieve_secret(
-            "SWIMS_PRIMERO_ANON_PASSWORD", folder_path=folder_path
-        ),
+        "GOOGLE_API_KEY": secret("SWIMS_GOOGLE_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"),
+        "GEMINI_MODEL": text_asset("SWIMS_GEMINI_MODEL", "GEMINI_MODEL"),
+        "PRIMERO_API_BASE_URL": text_asset("SWIMS_PRIMERO_API_BASE_URL", "SWIMS_API_BASE_URL", "PRIMERO_API_BASE_URL"),
+        "PRIMERO_ANON_USERNAME": secret("SWIMS_PRIMERO_ANON_USERNAME", "SWIMS_ANONYMOUS_USERNAME", "PRIMERO_ANON_USERNAME"),
+        "PRIMERO_ANON_PASSWORD": secret("SWIMS_PRIMERO_ANON_PASSWORD", "SWIMS_ANONYMOUS_PASSWORD", "PRIMERO_ANON_PASSWORD"),
     }
     for env_name, value in values.items():
         if not value:
@@ -59,7 +69,7 @@ def _hydrate_runtime_settings() -> None:
     # Worker/manager creds are NOT loaded here — authenticated ops use the per-request
     # acting-user session injected by the gateway, not a stored account.
     try:
-        owner = sdk.assets.retrieve("SWIMS_PRIMERO_DEFAULT_OWNER", folder_path=folder_path).value
+        owner = text_asset("SWIMS_PRIMERO_DEFAULT_OWNER", "PRIMERO_DEFAULT_OWNER")
         if owner:
             os.environ.setdefault("PRIMERO_DEFAULT_OWNER", str(owner))
     except Exception:
@@ -80,6 +90,9 @@ from prompts import SYSTEM_PROMPT  # noqa: E402
 class SwimsState(MessagesState):
     """Agent state = conversation messages + the acting user's SWIMS session (cookie/csrf)."""
     swims_session: Optional[dict]
+    swims_sender: Optional[str]
+    swims_message_id: Optional[str]
+    swims_channel: Optional[str]
 
 
 def _make_agent(llm, tools, system):
@@ -97,11 +110,12 @@ def _wrap_with_auth(react):
     SWIMS session. The gateway passes `swims_session` ({cookie, csrf}) from the logged-in
     WhatsApp user; the node sets it so every tool acts AS that user (Primero enforces role).
     No session -> anonymous reporting only (create_case) + dev fallback."""
-    from tools import set_acting_session
+    from tools import set_acting_session, set_channel_context
 
     def auth(state):
         sess = state.get("swims_session") or {}
         set_acting_session(sess.get("cookie"), sess.get("csrf"))
+        set_channel_context(state.get("swims_sender"), state.get("swims_message_id"), state.get("swims_channel"))
         return {}
 
     builder = StateGraph(SwimsState)

@@ -1,15 +1,93 @@
-import { spawn } from "node:child_process";
+import { UiPath } from "@uipath/uipath-typescript/core";
+import { ConversationalAgent, MessageRole } from "@uipath/uipath-typescript/conversational-agent";
 
-// Drives one WhatsApp conversation turn through the deployed UiPath agent.
-// Keeps a short per-sender history (sent to the agent each turn — the agent is invoked
-// statelessly per job). SWIMS session injection (worker login) is added later; for now
-// turns run anonymously (community reporting), which is the core demo path.
+function shortHash(value) {
+  let hash = 0;
+  for (const ch of String(value || "")) hash = ((hash << 5) - hash + ch.charCodeAt(0)) | 0;
+  return Math.abs(hash).toString(36);
+}
+
+function normalizeTextPartData(data) {
+  if (typeof data === "string") return data;
+  if (data && typeof data === "object" && typeof data.inline === "string") return data.inline;
+  if (data && typeof data === "object" && typeof data.value === "string") return data.value;
+  return "";
+}
+
+function extractCaseFromToolOutput(output) {
+  if (!output) return {};
+  const candidates = [];
+  if (typeof output === "string") {
+    candidates.push(output);
+    try { candidates.push(JSON.parse(output)); } catch {}
+  } else {
+    candidates.push(output);
+  }
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const swimsCaseId = candidate.swims_case_id || candidate.swimsCaseId || candidate.id;
+    const caseIdDisplay = candidate.case_id_display || candidate.caseIdDisplay || candidate.short_id;
+    if (swimsCaseId || caseIdDisplay) return { swimsCaseId, caseIdDisplay };
+  }
+  return {};
+}
+
+function errorText(error) {
+  if (!error) return "";
+  return [
+    error.message,
+    error.errorId,
+    error.details,
+    error.stack,
+    typeof error === "string" ? error : ""
+  ].filter(Boolean).map(String).join("\n");
+}
+
+function needsLoginText() {
+  return "To check case information, you need to be a signed-in SWIMS worker. Please sign in to continue.";
+}
+
+function releaseMarker(agent) {
+  return {
+    agentId: agent.id,
+    folderId: agent.folderId,
+    processVersion: agent.processVersion || agent.version || null,
+    releaseKey: agent.key || agent.releaseKey || null
+  };
+}
+
+function sameRelease(existing, agent) {
+  if (!existing) return false;
+  const marker = releaseMarker(agent);
+  return existing.agentId === marker.agentId
+    && existing.folderId === marker.folderId
+    && existing.processVersion === marker.processVersion
+    && existing.releaseKey === marker.releaseKey;
+}
+
+function agentError(text) {
+  const value = String(text || "").trim();
+  if (/needs_login|worker authentication/i.test(value)) {
+    const error = new Error(needsLoginText());
+    error.code = "NEEDS_LOGIN";
+    return error;
+  }
+  const firstLine = value.split(/\r?\n/).find(Boolean) || "UiPath conversational agent error";
+  return new Error(firstLine);
+}
+
+// Drives one WhatsApp conversation through UiPath's conversational-agent socket runtime.
 export class UiPathConversationClient {
-  constructor(config, logger) {
+  constructor(config, logger, stateStore, sessionManager) {
     this.config = config;
     this.logger = logger;
-    this.history = new Map(); // sender -> [{ role, content }]
-    this.sessions = new Map(); // sender -> { cookie, csrf }  (populated by the login flow, later)
+    this.stateStore = stateStore;
+    this.sessionManager = sessionManager;
+    this.sdk = null;
+    this.conversationalAgent = null;
+    this.agentRelease = null;
+    this.agentReleaseResolvedAt = 0;
+    this.sessions = new Map();
   }
 
   async turn(inbound) {
@@ -17,42 +95,286 @@ export class UiPathConversationClient {
       return { reply: "Please send a text message describing your concern or request.", caseStarted: false };
     }
     const sender = inbound.sender;
-    const hist = this.history.get(sender) || [];
+    const state = this.stateStore.get(sender);
+    const hist = state.history || [];
     hist.push({ role: "user", content: inbound.text });
 
-    const payload = JSON.stringify({ messages: hist, session: this.sessions.get(sender) || null });
-    const result = await this.#invoke(payload);
-    if (result.error) throw new Error(result.error);
+    const worker = await this.sessionManager.worker(sender);
+    const payload = {
+      messages: hist,
+      swims_session: worker ? { cookie: worker.cookie, csrf: worker.csrf } : null,
+      swims_sender: sender,
+      swims_message_id: inbound.messageId,
+      swims_channel: inbound.channel || "whatsapp"
+    };
 
+    const result = await this.#invokeConversational(inbound, payload, worker);
+
+    if (result.error) throw new Error(result.error);
     const reply = (result.reply || "").trim() || "Sorry, I couldn't process that. Please try again.";
     hist.push({ role: "assistant", content: reply });
-    this.history.set(sender, hist.slice(-this.config.historyTurns));
-    return { reply, caseStarted: false };
+    state.history = hist.slice(-this.config.historyTurns);
+    this.stateStore.save(sender, state);
+    return { ...result, reply, caseStarted: Boolean(result.swimsCaseId) };
   }
 
-  #invoke(payload) {
-    return new Promise((resolve, reject) => {
-      const proc = spawn(this.config.python, [this.config.invokeScript], { stdio: ["pipe", "pipe", "pipe"] });
-      let out = "";
-      let err = "";
-      const timer = setTimeout(() => proc.kill("SIGKILL"), this.config.turnTimeoutMs);
+  async #ensureConversationalAgent() {
+    if (this.conversationalAgent) return this.conversationalAgent;
+    if (!this.config.uipathBaseUrl || !this.config.uipathOrg || !this.config.uipathTenant || !this.config.uipathToken) {
+      throw new Error("UiPath conversational SDK is not configured: set UIPATH_URL/UIPATH_ORG/UIPATH_TENANT and UIPATH_ACCESS_TOKEN");
+    }
+    this.sdk = new UiPath({
+      baseUrl: this.config.uipathBaseUrl,
+      orgName: this.config.uipathOrg,
+      tenantName: this.config.uipathTenant,
+      secret: this.config.uipathToken
+    });
+    await this.sdk.initialize();
+    this.conversationalAgent = new ConversationalAgent(this.sdk, {
+      surfaceName: this.config.uipathSurfaceName,
+      surfaceVersion: this.config.uipathSurfaceVersion,
+      externalUserId: "swims-connect-whatsapp"
+    });
+    this.conversationalAgent.onConnectionStatusChanged((status, error) => {
+      this.logger.debug({ status, error: error?.message }, "UiPath conversational socket status changed");
+    });
+    return this.conversationalAgent;
+  }
 
-      proc.stdout.on("data", (d) => { out += d; });
-      proc.stderr.on("data", (d) => { err += d; });
-      proc.on("error", (e) => { clearTimeout(timer); reject(e); });
-      proc.on("close", () => {
+  async #resolveAgentRelease() {
+    if (this.agentRelease && (Date.now() - this.agentReleaseResolvedAt) < this.config.agentReleaseTtlMs) return this.agentRelease;
+    const ca = await this.#ensureConversationalAgent();
+    if (this.config.uipathAgentId && this.config.uipathFolderId) {
+      this.agentRelease = await ca.getById(this.config.uipathAgentId, this.config.uipathFolderId);
+      this.agentReleaseResolvedAt = Date.now();
+      return this.agentRelease;
+    }
+    const agents = await ca.getAll(this.config.uipathFolderId || undefined);
+    this.agentRelease = agents.find((agent) => {
+      const haystack = [agent.name, agent.title, agent.displayName, agent.key].filter(Boolean).join(" ").toLowerCase();
+      return haystack.includes(String(this.config.uipathAgentName || "").toLowerCase());
+    }) || agents[0];
+    if (!this.agentRelease) {
+      throw new Error(`No UiPath conversational agent release is visible${this.config.uipathFolderId ? ` in folder ${this.config.uipathFolderId}` : ""}`);
+    }
+    this.logger.info({
+      agentId: this.agentRelease.id,
+      folderId: this.agentRelease.folderId,
+      name: this.agentRelease.name || this.agentRelease.title || this.agentRelease.displayName,
+      processVersion: this.agentRelease.processVersion || this.agentRelease.version,
+      releaseKey: this.agentRelease.key || this.agentRelease.releaseKey
+    }, "Resolved UiPath conversational agent release");
+    this.agentReleaseResolvedAt = Date.now();
+    return this.agentRelease;
+  }
+
+  #sessionKey(sender, worker) {
+    return `${sender}:${worker ? shortHash(`${worker.cookie}:${worker.csrf}`) : "anonymous"}`;
+  }
+
+  async #getConversation(sender, payload, worker) {
+    const key = this.#sessionKey(sender, worker);
+    const state = this.stateStore.get(sender);
+    const existing = state.uipathConversation;
+    const freshEnough = existing?.updatedAt && (Date.now() - Date.parse(existing.updatedAt)) < this.config.conversationIdleTtlMs;
+    const sameAuth = existing?.sessionKey === key;
+    const ca = await this.#ensureConversationalAgent();
+    const agent = await this.#resolveAgentRelease();
+
+    if (existing?.id && sameAuth && freshEnough && sameRelease(existing, agent)) {
+      try {
+        const conversation = await ca.conversations.getById(existing.id);
+        state.uipathConversation = { ...existing, updatedAt: new Date().toISOString() };
+        this.stateStore.save(sender, state);
+        return conversation;
+      } catch (error) {
+        this.logger.warn({ error: error.message, sender, conversationId: existing.id }, "Stored UiPath conversation is not resumable; creating a new one");
+      }
+    } else if (existing?.id && sameAuth && freshEnough) {
+      this.logger.info({
+        sender,
+        conversationId: existing.id,
+        existingAgentId: existing.agentId,
+        existingFolderId: existing.folderId,
+        existingProcessVersion: existing.processVersion,
+        existingReleaseKey: existing.releaseKey,
+        currentAgentId: agent.id,
+        currentFolderId: agent.folderId,
+        currentProcessVersion: agent.processVersion || agent.version,
+        currentReleaseKey: agent.key || agent.releaseKey
+      }, "Stored UiPath conversation was created for a different agent release; creating a new one");
+    }
+
+    const agentInput = {
+      swims_sender: payload.swims_sender,
+      swims_channel: payload.swims_channel
+    };
+    if (payload.swims_session) agentInput.swims_session = payload.swims_session;
+    const conversation = await agent.conversations.create({
+      label: `SWIMS WhatsApp ${sender}`,
+      agentInput: {
+        inline: agentInput
+      }
+    });
+    state.uipathConversation = {
+      id: conversation.id,
+      ...releaseMarker(agent),
+      sessionKey: key,
+      updatedAt: new Date().toISOString()
+    };
+    this.stateStore.save(sender, state);
+    return conversation;
+  }
+
+  async #getLiveSession(sender, payload, worker) {
+    const key = this.#sessionKey(sender, worker);
+    const agent = await this.#resolveAgentRelease();
+    const cached = this.sessions.get(key);
+    if (cached && !cached.session.ended && (Date.now() - cached.lastUsedAt) < this.config.conversationIdleTtlMs && sameRelease(cached.agentMarker, agent)) {
+      cached.lastUsedAt = Date.now();
+      await cached.ready;
+      return cached;
+    } else if (cached) {
+      this.sessions.delete(key);
+      try { cached.conversation.endSession(); } catch {}
+    }
+
+    const conversation = await this.#getConversation(sender, payload, worker);
+    const session = conversation.startSession();
+    const ready = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("UiPath conversational session did not become ready")), 30000);
+      session.onSessionStarted(() => {
         clearTimeout(timer);
-        const line = out.split("\n").find((l) => l.startsWith("<<<AGENT_RESULT>>>"));
-        if (!line) return reject(new Error(`agent invoke produced no result: ${err.slice(-400) || out.slice(-400)}`));
-        try {
-          resolve(JSON.parse(line.replace("<<<AGENT_RESULT>>>", "")));
-        } catch (e) {
-          reject(new Error(`bad agent result JSON: ${line.slice(0, 200)}`));
-        }
+        resolve();
       });
+      session.onErrorStart((error) => {
+        clearTimeout(timer);
+        reject(agentError(errorText(error) || "UiPath conversational session error"));
+      });
+    });
+    const runtime = { key, conversation, session, ready, agentMarker: releaseMarker(agent), lastUsedAt: Date.now() };
+    this.sessions.set(key, runtime);
+    return runtime;
+  }
 
-      proc.stdin.write(payload);
-      proc.stdin.end();
+  async #invokeConversational(inbound, payload, worker) {
+    const sender = inbound.sender;
+    const runtime = await this.#getLiveSession(sender, payload, worker);
+    await runtime.ready;
+    runtime.lastUsedAt = Date.now();
+    const { conversation, session } = runtime;
+    const assistantParts = [];
+    const toolCaseResults = [];
+    const errors = [];
+
+    return await new Promise((resolve, reject) => {
+      let settled = false;
+      const cleanupFns = [];
+      const finish = (value, isError = false) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        for (const cleanup of cleanupFns) {
+          try { cleanup(); } catch {}
+        }
+        if (isError) {
+          this.sessions.delete(runtime.key);
+          try { conversation.endSession(); } catch {}
+        }
+        if (isError) reject(value);
+        else resolve(value);
+      };
+      const timer = setTimeout(() => {
+        const error = new Error(`UiPath conversational turn timed out after ${this.config.turnTimeoutMs}ms`);
+        error.code = "UIPATH_TURN_TIMEOUT";
+        finish(error, true);
+      }, this.config.turnTimeoutMs);
+
+      const attachExchangeHandlers = (exchange) => {
+        exchange.onMessageStart((message) => {
+          message.onContentPartCompleted((part) => {
+            if (!message.isAssistant) return;
+            const text = normalizeTextPartData(part.data);
+            if (text) assistantParts.push(text);
+          });
+          message.onToolCallCompleted((toolCall) => {
+            if (!message.isAssistant) return;
+            toolCaseResults.push(extractCaseFromToolOutput(toolCall.output));
+          });
+          message.onCompleted((completed) => {
+            if (completed.role !== MessageRole.Assistant) return;
+            for (const part of completed.contentParts || []) {
+              const text = normalizeTextPartData(part.data);
+              if (text && !assistantParts.includes(text)) assistantParts.push(text);
+            }
+            for (const toolCall of completed.toolCalls || []) {
+              toolCaseResults.push(extractCaseFromToolOutput(toolCall.output));
+            }
+          });
+        });
+        exchange.onMessageCompleted((completed) => {
+          if (completed.role !== MessageRole.Assistant) return;
+          for (const part of completed.contentParts || []) {
+            const text = normalizeTextPartData(part.data);
+            if (text && !assistantParts.includes(text)) assistantParts.push(text);
+          }
+          for (const toolCall of completed.toolCalls || []) {
+            toolCaseResults.push(extractCaseFromToolOutput(toolCall.output));
+          }
+        });
+        exchange.onExchangeEnd(() => {
+          const state = this.stateStore.get(sender);
+          state.uipathConversation = {
+            ...(state.uipathConversation || {}),
+            id: conversation.id,
+            ...(this.agentRelease ? releaseMarker(this.agentRelease) : {}),
+            updatedAt: new Date().toISOString()
+          };
+          this.stateStore.save(sender, state);
+          const caseResult = toolCaseResults.find((candidate) => candidate.swimsCaseId || candidate.caseIdDisplay) || {};
+          finish({
+            reply: assistantParts.join("").trim(),
+            swimsCaseId: caseResult.swimsCaseId,
+            caseIdDisplay: caseResult.caseIdDisplay,
+            errors
+          });
+        });
+      };
+
+      cleanupFns.push(session.onErrorStart((error) => {
+        const text = errorText(error) || "session error";
+        errors.push(text);
+        if (/needs_login|worker authentication/i.test(text)) {
+          finish({ reply: needsLoginText(), needsLogin: true, errors });
+        } else {
+          finish(agentError(text), true);
+        }
+      }));
+      cleanupFns.push(session.onExchangeStart((exchange) => {
+        attachExchangeHandlers(exchange);
+      }));
+      (async () => {
+        try {
+          const exchange = session.startExchange();
+          attachExchangeHandlers(exchange);
+          exchange.onErrorStart((error) => {
+            const text = errorText(error) || "exchange error";
+            errors.push(text);
+            if (/needs_login|worker authentication/i.test(text)) {
+              finish({ reply: needsLoginText(), needsLogin: true, errors });
+            } else {
+              finish(agentError(text), true);
+            }
+          });
+          await exchange.sendMessageWithContentPart({
+            data: inbound.text,
+            role: MessageRole.User,
+            mimeType: "text/plain"
+          });
+        } catch (error) {
+          finish(error, true);
+        }
+      })();
     });
   }
 }

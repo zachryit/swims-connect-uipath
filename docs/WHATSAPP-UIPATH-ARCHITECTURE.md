@@ -9,7 +9,13 @@ Baileys is transport only. UiPath Automation Cloud owns conversation execution, 
 ## Runtime flow
 
 1. A person messages `+233256590242`.
-2. `whatsapp-gateway` receives the message and normalizes the sender to E.164.
+2. `whatsapp-gateway` receives the message and normalizes the sender to E.164. Text-only greetings,
+   login/logout requests, and anonymous attempts to view cases/reports are handled deterministically
+   before invoking an LLM.
+2a. If the message contains media, the gateway downloads the original WhatsApp bytes into its private
+   state directory. Images are described with Gemini vision; voice notes are transcribed/classified
+   with Gemini audio. The original media is kept pending until a case is created, then uploaded to the
+   Primero case as an attachment.
 3. The gateway obtains a short-lived UiPath OAuth token using an External App stored only in environment variables.
 4. The gateway POSTs the turn to the API trigger for the UiPath **WhatsAppConversation** Maestro Flow.
 5. The Flow loads conversation state using the WhatsApp sender as the key and invokes `swims-connect-agent`.
@@ -51,9 +57,20 @@ Not every WhatsApp message is a child-protection case. Greetings, incomplete rep
 
 - WhatsApp pairing credentials remain under `whatsapp-gateway/state/` and are gitignored.
 - UiPath External App credentials remain in `.env` and are gitignored.
-- SWIMS worker passwords are never sent to the WhatsApp agent. The agent returns a short-lived HTTPS login link.
-- The login handler verifies credentials against SWIMS, encrypts the resulting session, and associates it with the WhatsApp sender.
+- SWIMS worker passwords are never sent to the WhatsApp agent. The gateway returns a short-lived HTTPS login link.
+- The login handler verifies credentials against SWIMS, encrypts the worker credentials/session in
+  `whatsapp-gateway/state/sessions`, and silently renews expired SWIMS sessions. Explicit logout removes
+  the saved credential and session.
 - Anonymous reporting uses the restricted anonymous SWIMS service identity stored as UiPath Orchestrator assets.
+- Anonymous users can report only. Case reads, analysis, case lists, task lists, and scheduled reports are
+  blocked before the agent is invoked and require a linked SWIMS worker account.
+
+## Latency migration note
+
+The coded agent is marked conversational in `agent/uipath.json`, and the WhatsApp gateway now uses
+`@uipath/uipath-typescript` as the only UiPath runtime path. The old `StartJobs` helper has been removed
+from the gateway. Sender-scoped UiPath conversations and live sessions are kept in the gateway so
+the transport does not start a fresh Orchestrator job per WhatsApp turn.
 
 ## Hackathon alignment
 

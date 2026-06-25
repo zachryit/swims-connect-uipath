@@ -2,7 +2,7 @@
   "$schema": "https://cloud.uipath.com/draft/2024-12/uipath",
   "id": "513e54cb-9aee-4d3e-9be9-8cc625ed02c6",
   "runtimeOptions": {
-    "isConversational": false
+    "isConversational": true
   },
   "packOptions": {
     "fileExtensionsIncluded": [],
