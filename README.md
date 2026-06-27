@@ -23,7 +23,11 @@ Chat on WhatsApp: **[+233 54 159 9802](https://wa.me/233541599802)**
 <p align="center">
   <img src="docs/images/swims-connect-conversation.png"
        alt="Sample WhatsApp conversation showing an anonymous child-protection report in SWIMS-Connect"
-       width="420">
+       width="46%">
+  &nbsp;
+  <img src="docs/images/swims-connect-worker-conversation.png"
+       alt="Sample WhatsApp conversation showing an authenticated worker reviewing priorities and preparing a case update"
+       width="46%">
 </p>
 
 ### Community reporting
