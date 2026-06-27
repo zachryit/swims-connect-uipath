@@ -20,6 +20,12 @@ Chat on WhatsApp: **[+233 54 159 9802](https://wa.me/233541599802)**
 > This is a trial environment. Use fictional test information only—never send a real child's name,
 > photograph, address, or other identifying information during a public trial.
 
+<p align="center">
+  <img src="docs/images/swims-connect-conversation.png"
+       alt="Sample WhatsApp conversation showing an anonymous child-protection report in SWIMS-Connect"
+       width="420">
+</p>
+
 ### Community reporting
 
 No account is needed to start an anonymous report. Try:
