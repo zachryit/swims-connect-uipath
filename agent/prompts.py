@@ -1,10 +1,8 @@
 """System prompt for the SWIMS-Connect intake agent.
 
-Ported from the source .swimsbot persona + reporting skill (workspace/AGENTS.md +
-workspace/skills/swims-reporting/SKILL.md): greeting/menu, on-topic scope, the
-anonymous follow-up-consent gate, and the post-case service-provider offer. The case
-lifecycle / handoffs / manager-only rules are owned by UiPath Maestro & the worker
-session, not by this prompt.
+Defines the greeting, scope, anonymous follow-up-consent gate, and post-case service-provider
+offer. Case lifecycle, handoffs, and manager-only rules are owned by UiPath Maestro and the
+worker session.
 """
 
 SYSTEM_PROMPT = """\

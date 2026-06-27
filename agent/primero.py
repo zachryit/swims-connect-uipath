@@ -1,9 +1,7 @@
-"""Primero / SWIMS REST client (Python port of the source runtime's swims-client + case-create).
+"""Primero / SWIMS REST client for the UiPath conversational agent.
 
-Native Devise cookie auth (3-step) + the case-create field mapping, ported faithfully so
-the UiPath coded agent writes the same valid records the original system did. In the UiPath
-tenant these operations move into API Workflows / an Integration Service connector; this module
-is the reference implementation + the local-dev path used to validate extraction quality.
+Implements native Devise cookie authentication and the case field mappings used by the deployed
+agent and local development.
 """
 from __future__ import annotations
 import os
@@ -20,7 +18,7 @@ TIMEOUT = float(os.environ.get("PRIMERO_TIMEOUT_S", "60"))
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 
 
-# ── field helpers (ported) ────────────────────────────────────────────────────
+# ── field helpers ─────────────────────────────────────────────────────────────
 def _normalise_sex(v) -> str | None:
     s = str(v or "").strip().lower()
     if re.fullmatch(r"m|male|boy|man|son|he|him", s):
@@ -49,7 +47,7 @@ def _is_date(s) -> bool:
 
 
 def build_case_data(report: dict) -> dict:
-    """Port of swims-case-create.js → the Primero `data` payload for POST /cases."""
+    """Build the Primero `data` payload for POST /cases."""
     report = dict(report or {})
     narrative = report.get("narrative") or report.get("what_happened") or "(No narrative provided)"
 
@@ -295,7 +293,7 @@ class PrimeroClient:
         r.raise_for_status()
         return r.json().get("data", [])
 
-    # ── lifecycle write operations (faithful port of .swimsbot/workspace/scripts/swims-*.js) ──
+    # ── lifecycle write operations ────────────────────────────────────────────
     @staticmethod
     def _norm(v) -> str:
         return str(v if v is not None else "").strip().lower()
@@ -320,8 +318,7 @@ class PrimeroClient:
                           requested_by: str | None = None, threats: str | None = None,
                           capacities: str | None = None, category: str | None = None,
                           decision: str | None = None) -> dict:
-        """Port of swims-case-assess.js (+ swims-assessment-fill.js): advance the case to
-        the 'assessment' stage and record the safety-assessment content in one PATCH."""
+        """Advance the case to assessment and record its safety content in one PATCH."""
         data = {"assessment_requested_on": assessment_date, "workflow": "assessment",
                 "case_plan_due_date": case_plan_due}
         if requested_by: data["assessment_requested_by"] = requested_by
@@ -334,8 +331,7 @@ class PrimeroClient:
 
     def add_intervention(self, case_id: str, *, service: str, goal: str | None = None,
                          provider: str | None = None, due: str | None = None) -> dict:
-        """Port of swims-caseplan-intervention.js: append one case-plan intervention
-        (GET + dedup by service name, since subform appends are non-idempotent)."""
+        """Append one case-plan intervention, deduplicated by service name."""
         current = self.get_case(case_id).get("cp_case_plan_subform_case_plan_interventions") or []
         if any(self._norm(it.get("intervention_service_to_be_provided")) == self._norm(service) for it in current):
             return {"ok": True, "skipped": True, "intervention": service}
@@ -349,8 +345,7 @@ class PrimeroClient:
     def record_case_plan(self, case_id: str, *, date: str, goal: str | None = None,
                          goal_due: str | None = None, review_date: str | None = None,
                          interventions: list[dict] | None = None) -> dict:
-        """Port of swims-caseplan-record.js: set date_case_plan (workflow trigger) → 'case_plan'
-        stage, then append any interventions."""
+        """Set the case-plan workflow trigger, then append any interventions."""
         data = {"date_case_plan": date, "workflow": "case_plan"}
         if goal: data["case_plan_goal"] = goal
         if goal_due: data["case_plan_goal_due_date"] = goal_due
@@ -362,7 +357,7 @@ class PrimeroClient:
     def add_service_referral(self, case_id: str, *, service_type: str, timeframe: str,
                              appointment: str | None = None, response_type: str = "service_provision",
                              notes: str | None = None, provider: str | None = None) -> dict:
-        """Port of swims-service-add.js: append a not-implemented service → 'service_provision'."""
+        """Append a pending service and advance to service provision."""
         from datetime import timedelta
         now = datetime.now(timezone.utc)
         tf = {"1_hour": timedelta(hours=1), "3_hours": timedelta(hours=3),
@@ -382,8 +377,7 @@ class PrimeroClient:
 
     def mark_service_delivered(self, case_id: str, *, date: str, service_id: str | None = None,
                               service_type: str | None = None) -> dict:
-        """Port of swims-service-implement.js: echo the target service back WITH its unique_id,
-        set implemented + day-time; if it's the last, advance to 'services_implemented'."""
+        """Mark a service delivered and advance when every service is implemented."""
         services = self.get_case(case_id).get("services_section") or []
         impl = lambda s: self._norm(s.get("service_implemented")) == "implemented"
         if service_id:
@@ -411,7 +405,7 @@ class PrimeroClient:
     def record_followup(self, case_id: str, *, needed_by: str | None = None, date: str | None = None,
                        followup_type: str | None = None, service_type: str | None = None,
                        comments: str | None = None) -> dict:
-        """Port of swims-case-followup.js: append a follow-up row (GET + dedup)."""
+        """Append a deduplicated follow-up row."""
         entry = {}
         if followup_type: entry["followup_type"] = followup_type
         if service_type: entry["followup_service_type"] = service_type
@@ -428,8 +422,7 @@ class PrimeroClient:
         return {"ok": True, "followup_count": len(d.get("followup_subform_section") or [])}
 
     def close_case(self, case_id: str, *, reason: str | None = None, notes: str | None = None) -> dict:
-        """Port of swims-case-close.js + swims-case-request-closure-approval.js: try to close;
-        on 403 (worker lacks CLOSE) fall back to requesting manager approval."""
+        """Try to close; on 403, fall back to requesting manager approval."""
         data = {"status": "closed"}
         if reason: data["closure_reason"] = reason
         r = self._patch(case_id, data, record_action="close")

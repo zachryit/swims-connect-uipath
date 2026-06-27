@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-// Scheduled WhatsApp reports — port of .swimsbot's scheduled-reports runner. Each schedule is
+// Scheduled WhatsApp reports. Each schedule is
 // per-sender; a per-minute tick finds due ones, DRIVES THE AGENT to generate the report (reusing
 // the agent's run_report tool, so no report logic is duplicated here), and sends it to WhatsApp.
 // SWIMS Ghana time is UTC±0, so UTC date/time == Accra local.

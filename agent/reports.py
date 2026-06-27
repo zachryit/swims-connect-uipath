@@ -1,5 +1,4 @@
-"""SWIMS reporting + client-side task derivation — Python port of .swimsbot's
-lib/swims-tasks.js + lib/scheduled-reports.js (report generation half).
+"""SWIMS reporting and client-side task derivation.
 
 Primero's /api/v2/tasks endpoint is permission-gated: the CP case-worker (self-scope) role CAN
 read it (200), while admin/superuser and supervisor (group) roles get 403. So worker task reports
@@ -116,7 +115,7 @@ def _status_for(due, now):
     return ("upcoming", 0)
 
 
-# ── task derivation (port of swims-tasks.js) ──────────────────────────────────
+# ── task derivation ───────────────────────────────────────────────────────────
 def derive_tasks(case_obj: dict, now: datetime, include_superseded: bool = False) -> list[dict]:
     d = (case_obj or {}).get("data") or case_obj or {}
     tasks: list[dict] = []

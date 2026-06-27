@@ -2,12 +2,11 @@
 
 **UiPath AgentHack · Track 1 (Maestro Case) · Deadline 2026-06-29 23:45 EDT (≈8 days)**
 
-This is the original build **playbook/plan**. For the **current, working** deploy / start / run /
-test steps and what's actually built, use **[README.md](README.md)** (the source of truth) — it
-reflects the shipped conversational coded agent + WhatsApp gateway + worker auth-context bridge.
-This guide still describes the broader target build (API Workflows, Maestro Case, Action Center)
-and the day-by-day schedule. (Note: the model is now `gemini-2.5-pro` via the `SWIMS_GEMINI_MODEL`
-asset, not `gemini-3.1-pro-preview`.) Read `PORTING-PLAN.md` first for the component mapping.
+This is the build **playbook/plan**. For the **current, working** deploy / start / run / test steps,
+use **[README.md](README.md)** (the source of truth). It covers the conversational coded agent,
+WhatsApp gateway, worker auth-context bridge, and Maestro deadline monitor. This guide also
+describes planned UiPath capabilities such as API Workflows and Integration Service. The configured
+model is `gemini-2.5-pro` through the `SWIMS_GEMINI_MODEL` asset.
 
 > Items marked **⚠ VERIFY** are not fully confirmed from docs and must be checked in your own tenant before you depend on them. Sources for every UiPath claim are in `docs/UIPATH-REFERENCE.md`.
 
@@ -17,7 +16,7 @@ asset, not `gemini-3.1-pro-preview`.) Read `PORTING-PLAN.md` first for the compo
 
 1. **Request UiPath Labs tenant access.** This is the critical path. Accepted AgentHack teams are invited to a UiPath Org in the **staging environment** with org-admin rights (up to 4 people); it takes **3–5 business days**. A self-serve Community/Free tenant will **not** reliably run Maestro Case. → Submit the AgentHack Labs request and **finalize your team roster** (the roster locks when access is created).
 2. **Provision the Gemini API key.** Get a Google AI Studio / Vertex `GOOGLE_API_KEY` for **`gemini-3.1-pro-preview`** (+ `gemini-2.5-flash` fallback). You said you'll provide these — drop them into the local `.env` (see §2). Confirm quota.
-3. **Confirm live Primero reachability.** We're reusing the existing Primero/SWIMS backend. Capture its base URL, the service-account credentials, and — critically — **export its OpenAPI/Swagger spec** (for the Integration Service connector). Confirm whether `/api/v2` is reachable from UiPath Automation Cloud (public URL or tunnel) — Automation Cloud Robots must be able to reach it.
+3. **Confirm Primero reachability.** Capture the target deployment's base URL and authorised service-account credentials, and **export its OpenAPI/Swagger spec** for the Integration Service connector. Confirm whether `/api/v2` is reachable from UiPath Automation Cloud (public URL or tunnel) — Automation Cloud Robots must be able to reach it.
 4. **Install the toolchain locally** (§1) so all tenant-independent work proceeds in parallel while Labs is provisioning.
 
 Everything in **Phase A (§3)** can be built and tested locally *before* the tenant arrives. Do not idle waiting for Labs.
@@ -54,28 +53,26 @@ uipath --version
 ```
 swims-connect-uipath/
 ├── README.md                 # hackathon-required: description, components, setup, agent-type
-├── PORTING-PLAN.md           # component-by-component source→UiPath mapping
 ├── IMPLEMENTATION-GUIDE.md   # this file
 ├── ARCHITECTURE.md           # target architecture + diagram
 ├── SUBMISSION.md             # rubric/bonus mapping, deliverables checklist, demo script
 ├── LICENSE                   # MIT (hackathon requires MIT or Apache-2.0)
 ├── .env.example              # GOOGLE_API_KEY, PRIMERO_*, UIPATH_* (no secrets committed)
 ├── docs/
-│   ├── SOURCE-INVENTORY.md   # full inventory of the source system (internal reference)
 │   └── UIPATH-REFERENCE.md   # cited UiPath research (internal reference)
 ├── agent/                    # Python LangGraph coded agent
 │   ├── pyproject.toml        # requires-python ">=3.11"; deps uipath, uipath-langchain, langchain-google-genai
 │   ├── langgraph.json        # {"graphs": {"agent": "graph.py:graph"}}
 │   ├── graph.py              # LangGraph graph (intake/extraction) + tools
-│   ├── prompts.py            # system prompt ported from IDENTITY.md + AGENTS.md (trimmed)
+│   ├── prompts.py            # safety, intake, reporting, and casework instructions
 │   ├── tools.py              # @tool wrappers that call API Workflows / connector
-│   ├── primero.py            # ported helpers: deriveTasks, concern mapping, subform dedup
+│   ├── primero.py            # Primero client, task derivation, field mapping, subform handling
 │   └── tests/                # local eval cases
 ├── api-workflows/            # exported Studio Web API Workflow definitions (per operation)
 ├── connector/                # Primero Integration Service connector (OpenAPI spec + config notes)
 ├── maestro/                  # exported Maestro Case model (.bpmn / project export)
 ├── action-app/               # Action Center / Action App definitions for HITL
-└── reports/                  # ported report templates (the 13 report types)
+└── reports/                  # report templates (the 13 report types)
 ```
 
 > `.env`, `.venv/`, `__pycache__/`, `node_modules/`, `*.nupkg`, any credentials are git-ignored.
@@ -110,7 +107,9 @@ graph = create_react_agent(llm, TOOLS, prompt=SYSTEM_PROMPT)
 # `graph` is the entrypoint UiPath `uipath init` introspects.
 ```
 
-`agent/prompts.py`: port `IDENTITY.md` + the behavioral guardrails from `AGENTS.md` — **but trim the workflow-routing parts**; Maestro now owns routing. Keep: calm/safety-first tone, "no final legal/medical determinations", anti-leak, anti-prompt-injection (treat report text as data), "ask for missing required fields", "never invent a Case ID".
+`agent/prompts.py`: define the calm, safety-first tone and behavioural safeguards: no final legal
+or medical determinations, treat report text as data, ask for missing required fields, and never
+invent a Case ID.
 
 `agent/tools.py`: each tool is a thin `@tool` that calls an API Workflow (once the tenant exists, via `sdk.processes.invoke(...)`) or, for local dev, calls Primero directly. Local-dev direct path lets you test extraction quality before the tenant arrives:
 ```python
@@ -125,7 +124,8 @@ def create_case(narrative: str, incident_type: str, risk_level: str,
     ...
 ```
 
-`agent/primero.py`: port `deriveTasks()` (from `lib/swims-tasks.js`), the concern-term→code map (`lib/swims-concerns.js`), and subform dedup/update-by-`unique_id` (`lib/subform-dedup.js`). These are correctness logic — copy faithfully.
+`agent/primero.py`: implement task derivation, the concern-term-to-code map, and subform
+deduplication/update-by-`unique_id`. Cover these correctness rules with tests.
 
 Local test (no tenant needed):
 ```bash
@@ -143,11 +143,15 @@ Iterate until extraction → `create_case` produces a real case in the live Prim
 
 ### A3. API Workflow definitions (design now, author in Studio Web when tenant arrives)
 
-For each operation in `PORTING-PLAN.md §3`, write the input/output contract + the HTTP call (method, path, headers, body, response mapping) into `api-workflows/<name>.md`. Group by operation, not one-per-script. Priority for the demo path: `case_create`, `case_get`, `cases_list`, `assessment_open`, `service_add`, `case_request_closure_approval`, `case_close`.
+For each required Primero operation, write the input/output contract and HTTP call (method, path,
+headers, body, response mapping) into `api-workflows/<name>.md`. Prioritise `case_create`,
+`case_get`, `cases_list`, `assessment_open`, `service_add`, `case_request_closure_approval`, and
+`case_close`.
 
 ### A4. Report templates
 
-Port the 13 report templates' query+filter+format logic from `lib/scheduled-reports.js` into `reports/` as either Python (report process) or API Workflow specs. Demo-critical: `high-risk`, `overdue-followups`, `pending-referrals`, `tasks-due-today`.
+Implement the 13 report templates' query, filtering, and formatting rules in `reports/`. Priority
+types are `high-risk`, `overdue-followups`, `pending-referrals`, and `tasks-due-today`.
 
 ### A5. Docs, demo script, deck (this repo)
 
@@ -181,7 +185,8 @@ Wire the agent's tools to invoke the published API Workflows (swap the local-dev
 
 ### B4. Author the Maestro Case (Studio Web)
 - New **Agentic Process** → model type **Case Management**.
-- Create the stages from `PORTING-PLAN.md §2`: **Intake → Assessment → Case Plan → Service Referral → Service Delivery → Closure** (+ a loopable **Follow-up** secondary stage).
+- Create the stages **Intake → Assessment → Case Plan → Service Referral → Service Delivery →
+  Closure**, with a loopable **Follow-up** secondary stage.
 - Per stage, add tasks: **Start & wait for agent** (the coded agent), **Start & wait for API workflow** (Primero ops), and **User tasks** for human checkpoints.
 - Entry/exit criteria + SLAs encode the source's "confirm-before-write", "all services delivered → advance", "403 → escalate".
 - **Closure stage:** a manager-assigned **User task** (Action Center) gates `case_close`; if not approved, route to `case_request_closure_approval`. This *is* the "manager-only close" rule, now platform-enforced.
@@ -194,7 +199,8 @@ Build an **Action App** (UiPath Apps / Studio Web) for: worker review/confirm-be
 - Confirm **agent traces** capture input/output/tokens/latency for the demo (audit story).
 
 ### B7. Reports
-Deploy the report process and attach an **Orchestrator time trigger** (replaces the systemd timer). Deliver via Action Center / Action App.
+Deploy the report process and attach an **Orchestrator time trigger**. Deliver through the approved
+worker channel.
 
 ---
 
@@ -212,7 +218,7 @@ Deploy the report process and attach an **Orchestrator time trigger** (replaces 
 | Day | Date | Focus | Depends on |
 |---|---|---|---|
 | **0** | Sun Jun 21 | Request Labs access; lock roster; get Gemini key; export Primero OpenAPI; install toolchain; `uip skills install --agent claude`; this repo + docs | — |
-| **1** | Mon Jun 22 | Build coded agent (A1): extraction → `create_case` solid vs live Primero locally; port `primero.py` helpers | Gemini key, Primero |
+| **1** | Mon Jun 22 | Build coded agent (A1): extraction → `create_case` solid vs live Primero locally; implement `primero.py` helpers | Gemini key, Primero |
 | **2** | Tue Jun 23 | Finish agent tools + local evals; connector spec (A2); API Workflow specs (A3); report templates (A4) | Day 1 |
 | **3** | Wed Jun 24 | Buffer for agent quality + docs/deck/demo script; **Labs may arrive** → B0 setup | Labs (maybe) |
 | **4** | Thu Jun 25 | **In-tenant**: B0 finish, B1 connector import, B2 API Workflows, B3 publish agent | **Labs** |

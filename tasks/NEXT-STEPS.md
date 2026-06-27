@@ -10,7 +10,7 @@ The coded agent is **live on UiPath Automation Cloud** and files real SWIMS case
 - **Agent** (`agent/`, Python LangGraph, Gemini): 10 tools — `create_case`, `get_case`, `list_cases`,
   `find_services` (Collation directory, live + bundled snapshot `agent/data/collation_snapshot.json`),
   and the 6 lifecycle ops. Acting-user auth (`swims_session` input → auth node → tools; Primero owns roles).
-  Anonymous reports route ownership to `PRIMERO_DEFAULT_OWNER` so a worker can act. Faithful port of `.swimsbot`.
+  Anonymous reports route ownership to `PRIMERO_DEFAULT_OWNER` so an authorised worker can act.
 - **Deployed**: `swims-connect-agent 0.1.3` published + released into `Shared`.
   Release key `62d451f2-7ccb-4302-8841-826083aedf87`; Shared folder Id `3141212`.
 - **Primero exposed**: `https://swims.ownaradio.com` (nginx vhost clone of brokergh.com + certbot;
@@ -29,8 +29,8 @@ parse `{messages}`, take the **last message's text**. Verified: reply included t
 
 ## NEXT (recommended order)
 1. **WhatsApp gateway → agent** (`whatsapp-gateway/`): rewrite `src/uipath-client.js` `turn()` to (a) keep per-sender
-   conversation history, (b) resolve the sender's SWIMS session (port `.swimsbot` `lib/session-store.js` + the login link,
-   which already runs at `swims.ownaradio.com/login`), (c) invoke the agent per the contract above, (d) return the reply.
+   conversation history, (b) resolve the sender's SWIMS session through the login link at
+   `swims.ownaradio.com/login`, (c) invoke the agent per the contract above, and (d) return the reply.
    `src/index.js` (Baileys loop) already calls `client.turn()` → sends reply. **Recommended:** a thin Python invoke-relay
    (uses the proven SDK extract_output) that the Node gateway POSTs to — keeps SWIMS logic in the UiPath agent. Pair the
    number `+233256590242` via Linked-Devices QR (`config.qrPath`).

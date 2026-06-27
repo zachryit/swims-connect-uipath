@@ -48,7 +48,7 @@ These 22 skills teach Claude Code how to build, validate, and deploy UiPath arti
 
 | # | Date | What the coding agent did | Output / result |
 |---|---|---|---|
-| 1 | 2026-06-21 | Researched the hackathon + UiPath platform; inventoried the source system; chose Track 1 + the hybrid architecture | `PORTING-PLAN.md`, `ARCHITECTURE.md`, `docs/SOURCE-INVENTORY.md`, `docs/UIPATH-REFERENCE.md` |
+| 1 | 2026-06-21 | Researched the UiPath platform and designed the solution architecture for Track 1 | `ARCHITECTURE.md`, `docs/UIPATH-REFERENCE.md` |
 | 2 | 2026-06-21 | Authored the phased build plan + submission/rubric mapping | `IMPLEMENTATION-GUIDE.md`, `SUBMISSION.md`, `README.md` |
 | 3 | 2026-06-21 | Built the Python LangGraph + Gemini coded agent (Primero client, concern mapper, tools, prompt, graph) | `agent/*.py`, `langgraph.json`, `pyproject.toml` |
 | 4 | 2026-06-21 | **Verified end-to-end**: NL report → Gemini 3.1 Pro extraction → real SWIMS `case_id_display` created against the live Primero backend | e.g. case `f220ca2` (child labour + educational neglect, Kumasi) |

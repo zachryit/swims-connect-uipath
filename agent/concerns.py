@@ -1,7 +1,6 @@
 """SWIMS / Primero "Secondary Protection Concerns" vocabulary + free-text mapping.
 
-Ported faithfully from the source runtime's concern mapper. SWIMS silently drops
-protection_concerns values that are not real lookup codes, so every code we send
+SWIMS silently drops protection_concerns values that are not real lookup codes, so every code we send
 to Primero MUST come from CONCERN_CODES below. Source of truth on the server:
 lookup-protection-concerns (refresh with GET /api/v2/lookups?per=999).
 """

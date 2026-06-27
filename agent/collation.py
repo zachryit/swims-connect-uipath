@@ -1,5 +1,6 @@
-"""Ghana Social Welfare Service Directory (Collation API) — Python port of .swimsbot's
-swims-services.js. Read-only, no-auth REST. This is the service-provider directory that
+"""Ghana Social Welfare Service Directory (Collation API).
+
+Read-only, no-auth REST. This is the service-provider directory that
 feeds SWIMS service referrals: find real providers (NGOs, CHRAJ, health, schools, …) by
 district/region, category, or search, with their contact details, so a worker refers a
 case to a REAL provider rather than a made-up name.
