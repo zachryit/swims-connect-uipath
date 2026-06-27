@@ -89,8 +89,6 @@ which validate inputs and return the Case ID supplied by Primero. Community inta
 consent gate. Worker assessment, case-plan, and referral actions use a **read → draft → review →
 accept** pattern; the tool writes only after explicit worker approval.
 
-Closure authority remains in Primero. The assistant can prepare or record the appropriate request,
-but a suitably authorised person completes approval in the Primero portal.
 
 ## Maestro deadline monitoring
 
