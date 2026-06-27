@@ -17,6 +17,8 @@ import { SessionStore } from "./session-store.js";
 import { SenderStateStore } from "./state-store.js";
 import { UiPathConversationClient } from "./uipath-client.js";
 import { ReportScheduler } from "./scheduler.js";
+import { MaestroClient } from "./maestro-client.js";
+import { CaseMonitor } from "./case-monitor.js";
 
 const config = loadConfig();
 const logger = pino({ level: config.logLevel });
@@ -30,19 +32,28 @@ const client = new UiPathConversationClient(config, logger, stateStore, sessionM
 // run_report tool serves on-demand and scheduled), then sends them to WhatsApp.
 let currentSocket = null;
 const jidFromSender = (sender) => `${String(sender).replace(/\D/g, "")}@s.whatsapp.net`;
+// Shared deps for the agent-driven background runners (scheduled reports + overdue case monitor):
+// both DRIVE THE AGENT to do Primero work and push results to WhatsApp.
+const workerActive = async (sender) => Boolean(await sessionManager.worker(sender));
+const generateTurn = async (sender, text) => {
+  const result = await client.turn({ sender, text, messageId: `auto-${Date.now()}`, channel: "whatsapp", messageType: "text" });
+  return result?.reply || null;
+};
+const sendText = async (sender, text) => {
+  if (!currentSocket) throw new Error("WhatsApp socket not connected");
+  await currentSocket.sendMessage(jidFromSender(sender), { text });
+};
 const scheduler = new ReportScheduler(config, {
   logger: logger.child({ component: "scheduler" }),
-  workerActive: async (sender) => Boolean(await sessionManager.worker(sender)),
-  generate: async (sender, text) => {
-    const result = await client.turn({ sender, text, messageId: `sched-${Date.now()}`, channel: "whatsapp", messageType: "text" });
-    return result?.reply || null;
-  },
-  send: async (sender, text) => {
-    if (!currentSocket) throw new Error("WhatsApp socket not connected");
-    await currentSocket.sendMessage(jidFromSender(sender), { text });
-  },
+  workerActive, generate: generateTurn, send: sendText,
 });
 loginService.scheduler = scheduler;
+// Maestro Case overdue monitor (disabled until the case is deployed + keys set in config).
+const maestro = new MaestroClient(config, logger.child({ component: "maestro" }));
+const caseMonitor = new CaseMonitor(config, {
+  logger: logger.child({ component: "case-monitor" }),
+  workerActive, generate: generateTurn, send: sendText, maestro,
+});
 const handled = new Set();
 const runtime = {
   loginServer: null,
@@ -175,6 +186,13 @@ async function routeTurn(socket, message, rawInbound) {
     updated.pendingMedia = [];
     updated.pendingConsent = false;
     if (failures.length) result.reply += "\n\nThe case was saved, but I couldn't attach the media. Please resend it and quote the Case ID.";
+    // A signed-in worker filed this case → start its Maestro overdue-monitor instance.
+    // No-op until the case is deployed + process/folder keys are configured. Anonymous reports
+    // have no WhatsApp owner to nudge, so they are intentionally skipped.
+    if (worker) {
+      caseMonitor.startForCase(result.swimsCaseId, inbound.sender)
+        .catch((error) => logger.error({ err: error?.message, caseId: result.swimsCaseId }, "Failed to start Maestro case monitor"));
+    }
   }
   stateStore.save(inbound.sender, updated);
   return result;
@@ -185,13 +203,49 @@ async function writeQr(qr) {
   await QRCode.toFile(config.qrPath, qr, { width: 512, margin: 2 });
   const ascii = await QRCode.toString(qr, { type: "terminal", small: true });
   process.stdout.write(
-    `\n=== Pair WhatsApp +233256590242 ===\nWhatsApp → Settings → Linked Devices → Link a device → scan:\n${ascii}\n(QR also saved to ${config.qrPath})\n`
+    `\n=== Pair WhatsApp +${config.whatsappBotNumber} ===\nWhatsApp → Settings → Linked Devices → Link a device → scan:\n${ascii}\n(QR also saved to ${config.qrPath})\n`
   );
+}
+
+// Request + print a WhatsApp pairing CODE for the configured number (number-driven linking).
+// Retries a few times because the socket may not be ready the instant we ask.
+let pairingRequested = false;
+let pairingAttempts = 0;
+async function requestPairing(socket) {
+  if (pairingRequested) return;
+  try {
+    const code = await socket.requestPairingCode(config.whatsappBotNumber);
+    pairingRequested = true;
+    const pretty = code?.match(/.{1,4}/g)?.join("-") || code;
+    process.stdout.write(
+      `\n=== Link WhatsApp +${config.whatsappBotNumber} ===\n` +
+      `On that phone: WhatsApp → Settings → Linked Devices → Link a device →\n` +
+      `"Link with phone number instead" → enter this code:\n\n    ${pretty}\n\n` +
+      `(Code expires in ~60s; the gateway will request a new one if it lapses.)\n`
+    );
+    logger.info({ number: config.whatsappBotNumber, code: pretty }, "WhatsApp pairing code issued");
+  } catch (error) {
+    pairingAttempts += 1;
+    logger.warn({ err: error?.message, attempt: pairingAttempts }, "Pairing-code request not ready; retrying");
+    if (pairingAttempts < 6) setTimeout(() => requestPairing(socket), 3000);
+    else logger.error("Pairing-code retries exhausted; restart the gateway or set WHATSAPP_USE_PAIRING_CODE=false for QR");
+  }
 }
 
 async function start() {
   await fs.mkdir(config.authDir, { recursive: true, mode: 0o700 });
-  const { state, saveCreds } = await useMultiFileAuthState(config.authDir);
+  let { state, saveCreds } = await useMultiFileAuthState(config.authDir);
+  // Env-driven (re)linking: if the saved session belongs to a DIFFERENT number than
+  // WHATSAPP_BOT_NUMBER, wipe it so we pair the configured number fresh. Change the env + restart
+  // to switch numbers.
+  const linkedDigits = String(state.creds?.me?.id || "").split(":")[0].replace(/\D/g, "");
+  if (config.whatsappBotNumber && linkedDigits && linkedDigits !== config.whatsappBotNumber) {
+    logger.warn({ linked: linkedDigits, configured: config.whatsappBotNumber }, "Configured WhatsApp number changed — clearing old session to re-link");
+    await fs.rm(config.authDir, { recursive: true, force: true });
+    await fs.mkdir(config.authDir, { recursive: true, mode: 0o700 });
+    ({ state, saveCreds } = await useMultiFileAuthState(config.authDir));
+    pairingRequested = false;
+  }
   const socket = makeWASocket({
     auth: state,
     logger: logger.child({ component: "baileys" }),
@@ -200,20 +254,30 @@ async function start() {
   });
   runtime.sockets.add(socket);
 
+  // Not linked yet → number-driven pairing code (unless QR mode is forced).
+  if (config.whatsappUsePairingCode && config.whatsappBotNumber && !state.creds.registered) {
+    setTimeout(() => requestPairing(socket), 3000);
+  }
+
   socket.ev.on("creds.update", saveCreds);
   socket.ev.on("connection.update", async ({ connection, lastDisconnect, qr }) => {
-    if (qr) await writeQr(qr);
+    // Show a QR only when pairing-code mode is off (or after a pairing-code failure).
+    if (qr && (!config.whatsappUsePairingCode || !pairingRequested)) await writeQr(qr);
     if (connection === "open") {
       logger.info("WhatsApp connected; UiPath is the conversation runtime");
       await fs.rm(config.qrPath, { force: true });
       currentSocket = socket;
       scheduler.start();
+      caseMonitor.start();
     }
     if (connection === "close") {
       runtime.sockets.delete(socket);
       const status = lastDisconnect?.error?.output?.statusCode;
       if (status === DisconnectReason.loggedOut) {
-        logger.error("WhatsApp logged out; remove the auth directory and pair again");
+        logger.warn("WhatsApp logged out (unlinked/device removed) — clearing session and re-pairing");
+        pairingRequested = false;
+        await fs.rm(config.authDir, { recursive: true, force: true }).catch(() => {});
+        setTimeout(() => start().catch((error) => logger.error({ error }, "Re-pair restart failed")), 1500);
         return;
       }
       logger.warn({ status }, "WhatsApp disconnected; reconnecting");

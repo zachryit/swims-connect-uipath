@@ -1,6 +1,6 @@
 [project]
 name = "swims-connect-agent"
-version = "0.1.15"
+version = "0.1.18"
 description = "SWIMS-Connect intake and case agent (LangGraph plus Gemini) UiPath coded agent"
 authors = [{ name = "SWIMS-Connect", email = "s.zachariyya@renmohomes.com" }]
 requires-python = ">=3.11"

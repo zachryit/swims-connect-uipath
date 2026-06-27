@@ -94,9 +94,13 @@ export class LoginService {
         const session = await this.sessions.login(pending.sender, String(form.get("username") || "").trim(), String(form.get("password") || ""));
         fs.rmSync(pending.file, { force: true });
         const user = session.user?.user_name || session.user?.data?.user_name || form.get("username");
-        const back = this.config.whatsappBotNumber ? `https://wa.me/${this.config.whatsappBotNumber}?text=${encodeURIComponent("I've signed in to SWIMS — please continue.")}` : "";
-        res.writeHead(back ? 302 : 200, back ? { Location: back } : { "Content-Type": "text/html" });
-        return res.end(back ? "Signed in. Returning to WhatsApp…" : `<p>Signed in as ${esc(user)}. You may return to WhatsApp.</p>`);
+        // Render a clear success PAGE (not a bare 302). It shows "signed in", auto-returns to
+        // WhatsApp, and offers a manual button — robust when the deep link can't auto-open (e.g. a
+        // self-chat to your own number) and avoids a confusing "invalid/expired" on back-navigation.
+        const wa = this.config.whatsappBotNumber
+          ? `https://wa.me/${this.config.whatsappBotNumber}?text=${encodeURIComponent("I've signed in to SWIMS — please continue.")}`
+          : "";
+        return res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }).end(this.#successPage(user, wa));
       } catch (error) {
         return res.writeHead(401, { "Content-Type": "text/html; charset=utf-8" }).end(this.#page(token, error.message));
       }
@@ -105,6 +109,13 @@ export class LoginService {
   }
 
   #page(token, error = "") {
-    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>SWIMS-Connect Login</title><style>body{font:16px system-ui;background:#eef5f0;display:grid;place-items:center;min-height:100vh}.card{background:white;padding:2rem;border-radius:12px;width:min(360px,85vw);box-shadow:0 4px 20px #1748}input,button{box-sizing:border-box;width:100%;padding:.75rem;margin:.4rem 0 1rem}button{background:#09623a;color:white;border:0;border-radius:6px}.error{color:#a21b1b}</style></head><body><main class="card"><h1>SWIMS-Connect</h1><p>Securely connect your SWIMS worker account.</p>${error ? `<p class="error">${esc(error)}</p>` : ""}<form method="post" action="/login"><input type="hidden" name="token" value="${esc(token)}"><label>Username<input name="username" autocomplete="username" required></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button>Connect account</button></form><small>Your credentials are encrypted for silent session renewal. Explicit logout removes them.</small></main></body></html>`;
+    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>SWIMS-Connect Login</title><style>body{font:16px system-ui;background:#eef5f0;display:grid;place-items:center;min-height:100vh}.card{background:white;padding:2rem;border-radius:12px;width:min(360px,85vw);box-shadow:0 4px 20px #1748}input,button{box-sizing:border-box;width:100%;padding:.75rem;margin:.4rem 0 1rem}button{background:#09623a;color:white;border:0;border-radius:6px}.error{color:#a21b1b}</style></head><body><main class="card"><h1>SWIMS-Connect</h1><p>Securely connect your SWIMS worker account.</p>${error ? `<p class="error">${esc(error)}</p>` : ""}<form method="post" action="/login" onsubmit="if(this.dataset.sent){return false}this.dataset.sent='1';var b=this.querySelector('button');if(b){b.textContent='Connecting…'}"><input type="hidden" name="token" value="${esc(token)}"><label>Username<input name="username" autocomplete="username" required></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button>Connect account</button></form><small>Your credentials are encrypted for silent session renewal. Explicit logout removes them.</small></main></body></html>`;
+  }
+
+  #successPage(user, wa) {
+    const meta = wa ? `<meta http-equiv="refresh" content="2;url=${esc(wa)}">` : "";
+    const js = wa ? `<script>setTimeout(function(){location.href=${JSON.stringify(wa)}},1500)</script>` : "";
+    const btn = wa ? `<a class="btn" href="${esc(wa)}">Return to WhatsApp</a>` : "";
+    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">${meta}<title>Signed in — SWIMS-Connect</title><style>body{font:16px system-ui;background:#eef5f0;display:grid;place-items:center;min-height:100vh;text-align:center}.card{background:white;padding:2rem;border-radius:12px;width:min(360px,85vw);box-shadow:0 4px 20px #1748}.tick{font-size:3rem;line-height:1}.btn{display:inline-block;margin-top:1rem;background:#09623a;color:white;text-decoration:none;padding:.75rem 1.25rem;border-radius:6px}</style></head><body><main class="card"><div class="tick">✅</div><h1>Signed in</h1><p>Connected as <strong>${esc(user)}</strong>. Your worker session is active — return to WhatsApp to continue.</p>${btn}</main>${js}</body></html>`;
   }
 }

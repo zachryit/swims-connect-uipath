@@ -2,18 +2,21 @@
 
 ## Purpose
 
-The WhatsApp number `+233256590242` is the public conversation channel for SWIMS-Connect. A small
-Baileys adapter (`whatsapp-gateway`) links the number via WhatsApp Linked Devices and is
-**transport only** — all reasoning, SWIMS reads/writes, and (planned) case orchestration run in
-UiPath Automation Cloud. The gateway drives the deployed **conversational coded agent**
-(`swims-connect-agent`) with the **UiPath TypeScript conversational SDK** (`@uipath/uipath-typescript`).
+The WhatsApp number (currently `+233541599802`, set via `WHATSAPP_BOT_NUMBER`) is the public
+conversation channel for SWIMS-Connect. A small Baileys adapter (`whatsapp-gateway`) links the number
+via WhatsApp Linked Devices — by default a **pairing code** printed to `state/gateway.log`
+(number-driven: change the env var + restart to link a different number; QR fallback via
+`WHATSAPP_USE_PAIRING_CODE=false`) — and is **transport only**. All reasoning, SWIMS reads/writes, and
+the **deployed Maestro Case** overdue monitor run in UiPath Automation Cloud. The gateway drives the
+deployed **conversational coded agent** (`swims-connect-agent`) with the **UiPath TypeScript
+conversational SDK** (`@uipath/uipath-typescript`).
 
 > There is no per-turn `StartJobs` and no API-trigger/Maestro-Flow hop in the live path — those
 > were removed in the conversational-SDK cutover.
 
 ## Runtime flow
 
-1. A person messages `+233256590242`.
+1. A person messages the gateway number (`+233541599802`).
 2. `whatsapp-gateway` normalizes the sender to E.164. Greetings, login/logout, anonymous attempts
    to view cases/reports, and the follow-up-consent reply are handled **deterministically** before
    any LLM call.

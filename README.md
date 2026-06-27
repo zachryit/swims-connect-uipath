@@ -27,18 +27,26 @@ transport-only WhatsApp adapter carries the conversation.
   details) and the agent acts **as that worker**, so **Primero enforces their real role** (a
   blocked action returns a clean "no"). See [Worker auth-context bridge](#worker-auth-context-bridge).
 
-**🚧 Scaffolded / next (project present, not yet wired into the live flow):**
-- **UiPath Maestro Case** orchestration of the full lifecycle (intake → assessment → case plan →
-  service referral → delivery → closure) — the project is in `SWIMSChildProtectionCase/`.
-- **Action Center** human-in-the-loop approval (e.g. manager-only case closure).
-- Scheduled caseload reports via Orchestrator triggers.
+- **UiPath Maestro Case — overdue monitor** (`SWIMSChildProtectionCase/`), **deployed & live**.
+  One instance per worker-filed SWIMS case runs five recipient-free SLA clocks (assessment, case
+  plan, service referral, follow-up, closure review). The gateway starts an instance per case and,
+  when a clock breaches, **confirms against live Primero and nudges the case owner over WhatsApp** —
+  done *for* the worker, no subscription. See [Maestro Case overdue monitor](#maestro-case-overdue-monitor).
+- **Scheduled & on-demand caseload reports** (13 types) driven through the agent.
+
+**⛔ Deliberately out of scope** (informed by how Primero actually works):
+- The case does **not** re-gate the workflow — Primero already blocks advancing an incomplete step,
+  so the Maestro stages mirror it read-only rather than duplicating validation.
+- **No Action Center / manager-approval routing** — there is no user directory to reach a specific
+  manager, and the system serves whoever is signed in. Closure approval stays in the Primero portal;
+  the agent simply records the request.
 
 ---
 
 ## Architecture (live path)
 
 ```
-WhatsApp (+233256590242)
+WhatsApp (+233541599802)
    │  Baileys adapter (transport only)
    ▼
 whatsapp-gateway (Node)
@@ -70,6 +78,26 @@ A conversational agent can't be handed a secret per turn, so worker auth flows l
 4. Every tool acts as that worker → **Primero enforces the role**. No SWIMS cookie ever touches
    the LLM context.
 
+### Maestro Case overdue monitor
+
+A UiPath Maestro Case (`SWIMSChildProtectionCase/`) is the per-case orchestration of record
+for SWIMS workflow deadlines. It is deliberately catalog-free — only stages, `wait-for-timer` tasks,
+and **recipient-free SLA clocks** (no connectors, agents, or Action Center).
+
+- **The case is the clock; the gateway is the precise judge + messenger.** Maestro timers/SLAs can't
+  bind to a per-instance variable date, so the case runs fixed SWIMS-policy clocks (assessment 3d,
+  case plan 14d, referral 7d, follow-up 30d, closure review 90d). The gateway reads Primero's *exact*
+  due dates and only nudges after confirming a step is genuinely outstanding.
+- **Lifecycle (gateway, `src/case-monitor.js` + `src/maestro-client.js`):** when a signed-in worker
+  files a case, the gateway starts one instance (Orchestrator `StartJobs`); a 30-min tick prunes
+  terminal instances and, ≤ once per case per 24 h, asks the agent to check live Primero and — if a
+  step is overdue and the owner is signed in — sends the owner a WhatsApp heads-up.
+- **Deploy:** the `uip` CLI can't deploy here (App-token has no user → 401 on Maestro/Studio Web).
+  Deployment is **PAT-REST** instead (user-context): upload package → create CaseManagement release
+  in `Shared` → start instances via `StartJobs`; PIMS (`pims_/api/v1`) for reads/cancel using the
+  `x-uipath-folderkey` header. Configure with `SWIMS_MAESTRO_MONITOR` / `SWIMS_MAESTRO_RELEASE_KEY` /
+  `SWIMS_MAESTRO_FOLDER_KEY` in `whatsapp-gateway/.env`.
+
 ---
 
 ## UiPath components used
@@ -79,10 +107,10 @@ A conversational agent can't be handed a secret per turn, so worker auth flows l
 | **Coded conversational agent** (Python, LangGraph) | Intake + extraction + voice/image understanding + SWIMS reads/writes; model from the `SWIMS_GEMINI_MODEL` asset (currently **gemini-2.5-pro**, bring-your-own Google key) |
 | **UiPath TypeScript conversational SDK** | The gateway's only runtime path to the agent (`@uipath/uipath-typescript`) |
 | **UiPath Orchestrator** | Process/release for `swims-connect-agent`; **Text/Secret assets** for Gemini key, Primero creds, default owner, and the bridge secret/URL; jobs & agent traces |
-| **UiPath Maestro Case** (`SWIMSChildProtectionCase/`) | Case-lifecycle orchestration — scaffolded; next to wire in |
-| **Baileys channel adapter** | Transport-only WhatsApp link for +233256590242 |
+| **UiPath Maestro Case** (`SWIMSChildProtectionCase/`) | **Deployed** overdue monitor — 5 recipient-free SLA clocks per case; gateway starts instances (Orchestrator `StartJobs`) + reads/cancels (PIMS), nudging the owner on overdue steps |
+| **Baileys channel adapter** | Transport-only WhatsApp link for the configured number (`WHATSAPP_BOT_NUMBER`) |
 
-**Agent type:** combination (coded LangGraph/Gemini agent + planned low-code Maestro Case) — **built with Claude Code**.
+**Agent type:** combination (coded LangGraph/Gemini agent + deployed Maestro Case overdue monitor) — **built with Claude Code**.
 
 ---
 
@@ -150,17 +178,34 @@ starts new conversations on the new version automatically.
 cd whatsapp-gateway
 npm install
 
-# foreground (first run prints a QR — scan it from WhatsApp on +233256590242):
-node src/index.js
-
 # detached (survives the shell), logging to state/gateway.log:
 setsid bash -c 'exec node src/index.js >> state/gateway.log 2>&1' < /dev/null &
-pgrep -f "node src/index.js" > state/gateway.pid
 ```
 
-- Pairing creds persist in `state/auth/` (no re-scan on restart). QR (if needed) → `state/wa-qr.png`.
+### Linking a WhatsApp number (env-driven)
+
+The number to link is **`WHATSAPP_BOT_NUMBER`** in `whatsapp-gateway/.env`. On first run (no saved
+session) the gateway requests a **pairing code** and prints it to `state/gateway.log`:
+
+```
+=== Link WhatsApp +<number> ===
+On that phone: WhatsApp → Settings → Linked Devices → Link a device →
+"Link with phone number instead" → enter this code:
+
+    XXXX-XXXX
+```
+
+Enter that code on the target phone. To watch for it: `grep -a "pairing code issued" state/gateway.log`.
+
+- **Switch numbers** — edit `WHATSAPP_BOT_NUMBER` and restart the gateway. A saved session bound to a
+  *different* number is cleared automatically, and the new number is paired fresh.
+- **QR instead of a code** — set `WHATSAPP_USE_PAIRING_CODE=false`; the QR prints to the log and
+  `state/wa-qr.png` (scan via WhatsApp → Linked Devices → Link a device).
+- **Unlinking auto-recovers** — a `device_removed`/logout clears the session and issues a fresh code
+  on its own (no manual cleanup).
+- Pairing creds persist in `state/auth/` (no re-link on normal restart).
 - Worker-login + bridge server listens on `127.0.0.1:18794`; health: `https://swims.ownaradio.com/health`.
-- Restart = stop the PID in `state/gateway.pid`, then run the detached command again.
+- Restart = `pkill -f "node src/index.js"`, then run the detached command again.
 
 ---
 
@@ -211,8 +256,10 @@ whatsapp-gateway/          Node Baileys adapter + login/bridge server
   src/auth-server.js       login link UI + POST /login/session-context resolver
   src/bridge.js            HMAC token mint/verify + anti-spoof strip
   src/primero-client.js    gateway-side Primero client + SessionManager (anon/worker/owner)
+  src/maestro-client.js    Maestro runtime client (StartJobs + PIMS, via the user PAT)
+  src/case-monitor.js      overdue monitor: start instance per case → poll → nudge owner
   scripts/*.mjs            end-to-end test harnesses
-SWIMSChildProtectionCase/  UiPath Maestro Case project (caseplan + WhatsAppConversation flow) — scaffolded
+SWIMSChildProtectionCase/  UiPath Maestro Case — overdue monitor (caseplan.json), DEPLOYED via PAT-REST
 docs/                      architecture, lifecycle contracts, source inventory, Claude Code evidence
 sdd.md · ARCHITECTURE.md · IMPLEMENTATION-GUIDE.md · SUBMISSION.md
 ```

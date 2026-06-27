@@ -148,21 +148,44 @@ def create_case(
 
 @tool
 def get_case(case_id: str, state: Annotated[dict, InjectedState] = None) -> dict:
-    """Look up a SWIMS case by its case_id_display or UUID. Returns status, workflow stage,
-    risk level, and key fields. Reads as the acting (logged-in) user — Primero scopes
-    visibility to cases they own/are assigned."""
+    """Look up a SWIMS case by its case_id_display or UUID. Returns the report NARRATIVE
+    (`narrative` / `report_note` / `notes` — the original concern in the reporter's words) plus
+    status, workflow stage, risk level, child details, dates, and protection concerns. When a user
+    asks about a case, share the narrative — not just status and concerns. Reads as the acting
+    (logged-in) user — Primero scopes visibility to cases they own/are assigned."""
     if not _has_acting(state):
         return _needs_login("case information")
     d = _acting(state).get_case(case_id)
     if not d:
         return {"ok": False, "message": f"I couldn't find case {case_id}, or you don't have access to it."}
+    # Surface the report NARRATIVE, not just status/concerns. The original report text is stored in
+    # the case notes (notes_section); the "Initial report (SWIMS-Connect)" note holds it.
+    notes = d.get("notes_section") or []
+    all_notes, report_note = [], ""
+    if isinstance(notes, list):
+        for n in notes:
+            all_notes.append({"subject": n.get("note_subject"), "date": n.get("note_date"),
+                              "text": (n.get("note_text") or "").strip()})
+        initial = next((n for n in notes if "Initial report" in str(n.get("note_subject", ""))),
+                       notes[0] if notes else {})
+        report_note = (initial.get("note_text") or "").strip()
+    narrative = report_note.split("\n—", 1)[0].strip() if report_note else ""
     return {
-        "case_id_display": d.get("case_id_display"),
+        "case_id_display": d.get("case_id_display") or d.get("short_id"),
         "status": d.get("status"),
         "workflow": d.get("workflow"),
         "risk_level": d.get("risk_level"),
         "name": d.get("name"),
+        "age": d.get("age"),
+        "sex": d.get("sex"),
+        "location": d.get("address_current"),
+        "registration_date": d.get("registration_date") or d.get("created_at"),
+        "assessment_due_date": d.get("assessment_due_date"),
+        "has_case_plan": d.get("has_case_plan"),
         "protection_concerns": d.get("protection_concerns"),
+        "narrative": narrative,        # the original report, in the reporter's words
+        "report_note": report_note,    # full intake note (narrative + report metadata)
+        "notes": all_notes,            # every note on the case
     }
 
 

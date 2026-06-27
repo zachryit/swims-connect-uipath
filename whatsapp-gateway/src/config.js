@@ -35,6 +35,21 @@ export function loadConfig() {
     turnTimeoutMs: Number(process.env.AGENT_TURN_TIMEOUT_MS || 75000),
     historyTurns: Number(process.env.HISTORY_TURNS || 20),
 
+    // Maestro Case (SWIMSChildProtectionCase) overdue monitor. Disabled until the case is
+    // deployed and the process+folder keys are set — then the gateway starts one instance per
+    // worker-filed case and nudges the owner when a step goes overdue (live Primero check via the agent).
+    repoRoot,
+    uipBin: process.env.UIP_BIN || "uip",
+    maestroMonitorEnabled: ["1", "true", "yes"].includes(String(process.env.SWIMS_MAESTRO_MONITOR || "").toLowerCase()),
+    // Release key from `Releases` (POST returns it on deploy); folder key + id are the Shared folder.
+    // StartJobs uses uipathFolderId (OU id); PIMS reads/cancel use maestroFolderKey (folder key).
+    maestroReleaseKey: process.env.SWIMS_MAESTRO_RELEASE_KEY || "",
+    maestroFolderKey: process.env.SWIMS_MAESTRO_FOLDER_KEY || "",
+    maestroPollMs: Number(process.env.SWIMS_MAESTRO_POLL_MS || 30 * 60 * 1000),
+    maestroCheckIntervalMs: Number(process.env.SWIMS_MAESTRO_CHECK_INTERVAL_MS || 12 * 60 * 60 * 1000),
+    maestroNudgeCooldownMs: Number(process.env.SWIMS_MAESTRO_NUDGE_COOLDOWN_MS || 24 * 60 * 60 * 1000),
+    maestroCliTimeoutMs: Number(process.env.SWIMS_MAESTRO_CLI_TIMEOUT_MS || 60000),
+
     stateDir: path.resolve(process.env.SWIMS_GATEWAY_STATE_DIR || "./state"),
     mediaDir: path.resolve(process.env.SWIMS_MEDIA_DIR || "./state/media/inbound"),
     maxMediaBytes: Number(process.env.SWIMS_MAX_MEDIA_BYTES || 20 * 1024 * 1024),
@@ -63,7 +78,12 @@ export function loadConfig() {
     authServerUrl: process.env.AUTH_SERVER_URL || "https://swims.ownaradio.com",
     authServerBind: process.env.AUTH_SERVER_BIND || "127.0.0.1",
     authServerPort: Number(process.env.AUTH_SERVER_PORT || 18794),
+    // The WhatsApp number to link, env-driven. Change WHATSAPP_BOT_NUMBER + restart to link a
+    // different number (the gateway clears a session bound to a different number and re-pairs).
     whatsappBotNumber: String(process.env.WHATSAPP_BOT_NUMBER || "233256590242").replace(/\D/g, ""),
+    // Link via WhatsApp's pairing CODE (number-driven, headless-friendly) rather than a QR scan.
+    // Set WHATSAPP_USE_PAIRING_CODE=false to fall back to QR.
+    whatsappUsePairingCode: !["0", "false", "no"].includes(String(process.env.WHATSAPP_USE_PAIRING_CODE ?? "true").toLowerCase()),
 
     authDir: path.resolve(process.env.WHATSAPP_AUTH_DIR || "./state/auth"),
     qrPath: path.resolve(process.env.WHATSAPP_QR_PATH || "./state/wa-qr.png"),
