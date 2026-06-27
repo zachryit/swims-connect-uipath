@@ -2,15 +2,7 @@
 
 A Maestro Case whose only job is to be the durable, per-case orchestration that runs five SWIMS-workflow **SLA clocks** for one real SWIMS case. When a step's clock breaches, the WhatsApp gateway proactively warns the case **owner** that the **assessment**, **case plan**, **service referral**, **follow-up**, or **closure review** is overdue — without the owner ever subscribing to a report.
 
-## Design Principles (read first — these constrain everything below)
 
-1. **Mirror Primero, never re-gate it.** The five stages mirror the SWIMS workflow steps for visibility only. Primero already refuses to advance a worker who hasn't completed the current step — the case does **not** repeat that validation and has **no** human-in-the-loop approval tasks.
-2. **No hardcoded people, no directory.** The case escalates to **nobody** — every stage SLA carries an **empty escalation list**, so the runtime tracks At-Risk/Breached status with no notification recipient. The only message that ever goes out is sent by the gateway to the **case owner** (the authenticated user who filed the case), passed in as `caseOwner` at instance start.
-3. **Done *for* the user, not subscribed *by* the user.** One instance is started automatically per real SWIMS case. The owner does not opt in.
-4. **Catalog-free.** Only `case-management:Stage`, `wait-for-timer` tasks, recipient-free SLA rules, and stage conditions. **No** connectors, Action Apps, agents, API workflows, or Integration Service — nothing requires the Maestro registry/catalog to resolve.
-5. **The case is the clock; the gateway is the messenger and the precise judge.** Maestro timers and SLAs cannot bind to a per-instance variable date (a documented schema limit), so the case runs **fixed SWIMS-policy timeframes**. The gateway — which *can* read Primero's exact computed due date and current state — polls each instance's breach status, and only sends an "overdue …" nudge after confirming against **live Primero** that the step is genuinely still outstanding. Primero stays the single source of truth.
-
-> **Out of scope (deliberately):** worker-review HITL, manager closure *approval*, and any SWIMS *writes*. Those live in the conversational `swims-connect-agent`, not here. The Closure Review stage only watches the clock and nudges the owner to review — it never approves or performs closure. Closure approval is unchanged: the agent still tells the user the request is recorded for a manager to action in the Primero portal.
 
 ## Section 1: Case Definition
 
