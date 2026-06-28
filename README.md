@@ -109,6 +109,7 @@ violence. It was developed with support from UNICEF and aligned with Ghana's sta
 workflows, referral pathways, and operating procedures. See the
 [Ghana Ministry's SWIMS overview](https://www.mogcsp.gov.gh/swims/) and
 [UNICEF Ghana's launch account](https://www.unicef.org/ghana/press-releases/powerful-digital-tools-standards-launched-improve-integrated-social-services).
+[Primero on Github](https://github.com/primeroIMS/primero)
 
 ### The case-management journey
 
