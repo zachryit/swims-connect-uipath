@@ -18,14 +18,15 @@ import { MaestroClient } from "./maestro-client.js";
 // so the gateway runs unchanged until the case is deployed and the keys are set.
 
 const NONE = /^\s*none\b/i; // agent replies exactly "NONE" when nothing is overdue
+const CLOSED = /^\s*closed\b/i; // agent replies exactly "CLOSED" when Primero says the case is closed
 
 function checkPrompt(swimsCaseId) {
   return (
     `[Automated overdue check — not a user message] For SWIMS case ${swimsCaseId}, check Primero now: ` +
     `are any workflow steps overdue (assessment, case plan, service referral, follow-up, or closure ` +
     `review past their due date and not yet completed)? If yes, reply with a brief WhatsApp heads-up ` +
-    `addressed to the case owner that names the case ID and ONLY the overdue step(s). If nothing is ` +
-    `overdue, or the case is closed, reply with exactly: NONE`
+    `addressed to the case owner that names the case ID and ONLY the overdue step(s). If the case ` +
+    `is closed, reply with exactly: CLOSED. If it is open and nothing is overdue, reply with exactly: NONE`
   );
 }
 
@@ -100,6 +101,9 @@ export class CaseMonitor {
 
   start() {
     if (!this.enabled || this.timer) return;
+    // Materialize durable state at startup, even before the first case. This makes activation
+    // observable and gives restarts a stable file to reconcile.
+    this.#write(this.#read());
     this.timer = setInterval(() => this.tick().catch((e) => this.logger.error({ err: e?.message }, "Case-monitor tick failed")), this.pollMs);
     this.tick().catch(() => {});
     this.logger.info({ pollMs: this.pollMs }, "Case monitor started");
@@ -132,6 +136,14 @@ export class CaseMonitor {
 
         // 4. Drive the agent to confirm against live Primero, then nudge the owner if overdue.
         const reply = await this.deps.generate(m.caseOwner, checkPrompt(m.swimsCaseId));
+        if (reply && CLOSED.test(reply)) {
+          if (m.instanceId) await this.maestro.cancelInstance(m.instanceId, this.config.maestroFolderKey);
+          this.logger.info(
+            { swimsCaseId: m.swimsCaseId, instanceId: m.instanceId },
+            "Primero case closed — cancelled + removed Maestro case monitor",
+          );
+          continue;
+        }
         if (reply && !NONE.test(reply)) {
           const dupRecent = reply === m.lastNudgeText && m.lastNudgeAt && now - new Date(m.lastNudgeAt) < this.nudgeCooldownMs;
           const cooling = m.lastNudgeAt && now - new Date(m.lastNudgeAt) < this.nudgeCooldownMs;

@@ -19,6 +19,7 @@ import { UiPathConversationClient } from "./uipath-client.js";
 import { ReportScheduler } from "./scheduler.js";
 import { MaestroClient } from "./maestro-client.js";
 import { CaseMonitor } from "./case-monitor.js";
+import { syncClosedCaseMonitor } from "./lifecycle-sync.js";
 
 const config = loadConfig();
 const logger = pino({ level: config.logLevel });
@@ -194,6 +195,9 @@ async function routeTurn(socket, message, rawInbound) {
         .catch((error) => logger.error({ err: error?.message, caseId: result.swimsCaseId }, "Failed to start Maestro case monitor"));
     }
   }
+  // Only a tool result with closed=true reaches this path. A worker's closure-approval request
+  // keeps its monitor alive until an authorised manager actually closes the Primero case.
+  await syncClosedCaseMonitor(result, caseMonitor, logger.child({ component: "case-monitor" }));
   stateStore.save(inbound.sender, updated);
   return result;
 }

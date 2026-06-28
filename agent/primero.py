@@ -423,22 +423,26 @@ class PrimeroClient:
 
     def close_case(self, case_id: str, *, reason: str | None = None, notes: str | None = None) -> dict:
         """Try to close; on 403, fall back to requesting manager approval."""
+        uuid = self._case_uuid(case_id) or case_id
         data = {"status": "closed"}
         if reason: data["closure_reason"] = reason
-        r = self._patch(case_id, data, record_action="close")
+        r = self._patch(uuid, data, record_action="close")
         if r.status_code in (200, 201):
             d = r.json().get("data", {})
             return {"ok": True, "closed": True, "status": d.get("status", "closed"),
-                    "date_closure": d.get("date_closure")}
+                    "date_closure": d.get("date_closure"),
+                    "swims_case_id": d.get("id") or uuid,
+                    "case_id_display": d.get("case_id_display") or d.get("short_id") or case_id}
         if r.status_code == 403:
             payload = {"approval_status": "requested"}
             if notes or reason:
                 payload["notes"] = notes or reason
-            ar = self.request("PATCH", f"/cases/{case_id}/approvals/closure", json={"data": payload})
+            ar = self.request("PATCH", f"/cases/{uuid}/approvals/closure", json={"data": payload})
             if ar.status_code not in (200, 201):
                 raise RuntimeError(f"request_closure_approval failed (HTTP {ar.status_code}): {ar.text[:300]}")
             return {"ok": True, "closed": False, "approval_requested": True,
-                    "message": "Closure requires manager approval; approval requested."}
+                    "message": "Closure requires manager approval; approval requested.",
+                    "swims_case_id": uuid, "case_id_display": case_id}
         raise RuntimeError(f"close_case failed (HTTP {r.status_code}): {r.text[:300]}")
 
 

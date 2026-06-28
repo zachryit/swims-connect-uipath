@@ -15,7 +15,7 @@ function normalizeTextPartData(data) {
   return "";
 }
 
-function extractCaseFromToolOutput(output) {
+export function extractCaseFromToolOutput(output) {
   if (!output) return {};
   const candidates = [];
   if (typeof output === "string") {
@@ -28,7 +28,15 @@ function extractCaseFromToolOutput(output) {
     if (!candidate || typeof candidate !== "object") continue;
     const swimsCaseId = candidate.swims_case_id || candidate.swimsCaseId || candidate.id;
     const caseIdDisplay = candidate.case_id_display || candidate.caseIdDisplay || candidate.short_id;
-    if (swimsCaseId || caseIdDisplay) return { swimsCaseId, caseIdDisplay };
+    if (swimsCaseId || caseIdDisplay) {
+      return {
+        swimsCaseId,
+        caseIdDisplay,
+        closed: candidate.closed === true,
+        approvalRequested: candidate.approval_requested === true || candidate.approvalRequested === true,
+        status: candidate.status,
+      };
+    }
   }
   return {};
 }
@@ -390,10 +398,14 @@ export class UiPathConversationClient {
           };
           this.stateStore.save(sender, state);
           const caseResult = toolCaseResults.find((candidate) => candidate.swimsCaseId || candidate.caseIdDisplay) || {};
+          const closureResult = toolCaseResults.find((candidate) => candidate.closed === true) || {};
           finish({
             reply: assistantParts.join("").trim(),
             swimsCaseId: caseResult.swimsCaseId,
             caseIdDisplay: caseResult.caseIdDisplay,
+            caseClosed: closureResult.closed === true,
+            // Monitors are keyed by the Primero UUID returned at creation time.
+            closedCaseId: closureResult.swimsCaseId || closureResult.caseIdDisplay,
             errors
           });
         });

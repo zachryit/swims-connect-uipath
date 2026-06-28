@@ -387,7 +387,11 @@ def close_case(case_id: str, reason: str = "", notes: str = "",
     returns approval_requested=true and routes the closure to a CP Manager for approval."""
     if not _has_acting(state):
         return _needs_login("case closure")
-    return _acting(state).close_case(case_id, reason=reason or None, notes=notes or None)
+    result = _acting(state).close_case(case_id, reason=reason or None, notes=notes or None)
+    # Preserve the case identifier in the tool result so the WhatsApp gateway can immediately
+    # cancel the corresponding Maestro monitor after Primero confirms a real closure. A worker's
+    # manager-approval request returns closed=false and therefore leaves the monitor running.
+    return {**result, "case_id_display": result.get("case_id_display") or case_id}
 
 
 TOOLS = [
