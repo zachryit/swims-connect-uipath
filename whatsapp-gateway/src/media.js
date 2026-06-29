@@ -7,6 +7,7 @@ import { downloadMediaMessage } from "baileys";
 
 const execFileAsync = promisify(execFile);
 const EXTENSIONS = { "image/jpeg": "jpg", "image/png": "png", "audio/ogg": "ogg", "audio/ogg; codecs=opus": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "application/pdf": "pdf" };
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function downloadInboundMedia(message, inbound, socket, config, logger) {
   if (inbound.messageType === "text") return null;
@@ -19,32 +20,87 @@ export async function downloadInboundMedia(message, inbound, socket, config, log
   return { path: filePath, mimeType: inbound.mimeType, kind: inbound.messageType, caption: inbound.text, messageId: inbound.messageId };
 }
 
-async function geminiMedia(config, media, prompt) {
+function mediaTimeoutError(error) {
+  return error?.name === "AbortError" || error?.code === 20 || /aborted|timeout|timed out/i.test(String(error?.message || error || ""));
+}
+
+function retryableMediaError(error) {
+  return mediaTimeoutError(error) || /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|5\d\d|429/i.test(String(error?.message || error || ""));
+}
+
+function parseGeminiJson(raw) {
+  const text = String(raw || "{}").trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
+  try { return JSON.parse(text); } catch {}
+  const start = text.indexOf("{");
+  if (start < 0) throw new Error("Media analysis returned no JSON");
+  let depth = 0, inString = false, escaped = false;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === "\"") inString = false;
+      continue;
+    }
+    if (ch === "\"") inString = true;
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return JSON.parse(text.slice(start, i + 1));
+    }
+  }
+  throw new Error("Media analysis returned incomplete JSON");
+}
+
+async function geminiMedia(config, media, prompt, options = {}) {
   if (!config.googleApiKey) throw new Error("Voice and image analysis is not configured");
   const bytes = await fs.readFile(media.path);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), config.mediaAnalysisTimeoutMs);
-  try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.transcribeModel)}:generateContent?key=${config.googleApiKey}`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: media.mimeType.split(";")[0], data: bytes.toString("base64") } }] }], generationConfig: { responseMimeType: "application/json", temperature: 0 } })
-    });
-    const body = await response.json();
-    if (!response.ok) throw new Error(body?.error?.message || `Media analysis failed (${response.status})`);
-    const raw = body?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "{}";
-    return JSON.parse(raw.replace(/^```(?:json)?|```$/g, "").trim());
-  } finally { clearTimeout(timer); }
+  const attempts = Math.max(1, Number(options.attempts || 1));
+  const timeoutMs = Number(options.timeoutMs || config.mediaAnalysisTimeoutMs);
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.transcribeModel)}:generateContent?key=${config.googleApiKey}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: media.mimeType.split(";")[0], data: bytes.toString("base64") } }] }], generationConfig: { responseMimeType: "application/json", temperature: 0 } })
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body?.error?.message || `Media analysis failed (${response.status})`);
+      const raw = body?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "{}";
+      return parseGeminiJson(raw);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts || !retryableMediaError(error)) throw error;
+      await sleep(750 * attempt);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastError || new Error("Media analysis failed");
 }
 
 export async function analyzeMedia(config, media) {
   if (media.kind === "audio") {
-    const result = await geminiMedia(config, media, [
-      "Analyze this WhatsApp voice note for Ghana child-protection intake.",
-      "Return JSON only: {\"language\":\"english|non_english|unknown\",\"transcript\":\"\",\"childProtectionConcern\":true|false,\"urgent\":true|false}.",
-      "For English, transcribe verbatim. For every other language or unclear speech, transcript must be empty.",
-      "A concern includes abuse, neglect, exploitation, trafficking, child labour, child marriage, or a child in danger."
-    ].join(" "));
-    return { language: result.language || "unknown", transcript: result.language === "english" ? String(result.transcript || "").trim() : "", concerning: result.childProtectionConcern === true, urgent: result.urgent === true };
+    const upload = await convertAudio(media);
+    try {
+      const result = await geminiMedia(config, upload, [
+        "Analyze this WhatsApp voice note for Ghana child-protection intake.",
+        "Return JSON only: {\"language\":\"english|non_english|unknown\",\"transcript\":\"\",\"childProtectionConcern\":true|false,\"urgent\":true|false}.",
+        "For English, transcribe verbatim. For every other language or unclear speech, transcript must be empty.",
+        "A concern includes abuse, neglect, exploitation, trafficking, child labour, child marriage, or a child in danger."
+      ].join(" "), {
+        timeoutMs: config.audioAnalysisTimeoutMs || config.mediaAnalysisTimeoutMs,
+        attempts: Math.max(1, Number(config.mediaAnalysisRetries || 0) + 1)
+      });
+      return { language: result.language || "unknown", transcript: result.language === "english" ? String(result.transcript || "").trim() : "", concerning: result.childProtectionConcern === true, urgent: result.urgent === true };
+    } catch (error) {
+      if (!retryableMediaError(error)) throw error;
+      return { language: "unknown", transcript: "", concerning: false, urgent: false, transientError: true };
+    } finally {
+      if (upload.converted) await fs.rm(upload.path, { force: true });
+    }
   }
   if (media.kind === "image") {
     const result = await geminiMedia(config, media, [

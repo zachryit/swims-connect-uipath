@@ -131,7 +131,9 @@ async function prepareTurn(socket, message, inbound) {
   stateStore.save(inbound.sender, state);
 
   if (media.kind === "audio") {
-    inbound.text = analysis.language === "english" && analysis.transcript
+    inbound.text = analysis.transientError
+      ? "A WhatsApp voice note was received, but automatic transcription timed out. Apologize and ask the sender to type the report or send a shorter, clearer voice note."
+      : analysis.language === "english" && analysis.transcript
       ? `[WhatsApp voice note transcript]\n${analysis.transcript}`
       : `[Non-English or unclear WhatsApp voice note; transcript intentionally withheld. Child-protection concern detected: ${analysis.concerning ? "yes" : "no"}.]`;
     inbound.voiceLanguage = analysis.language;
@@ -215,8 +217,16 @@ async function writeQr(qr) {
 // Retries a few times because the socket may not be ready the instant we ask.
 let pairingRequested = false;
 let pairingAttempts = 0;
+// Re-pair safety. A genuine logout wipes auth and re-pairs, and a lapsed pairing re-issues a code —
+// but if nobody enters a code we must NOT spin forever: each cycle burns a pairing code, and
+// hammering WhatsApp can get the number rate-limited (this loop once emitted 182 codes in ~10h).
+// Bound the unattended cycles, back off between them, and reset on a successful "open".
+// `activeSocket` lets retry timers left over from a closed socket no-op instead of firing blind.
+let repairCycles = 0;
+let activeSocket = null;
+const MAX_REPAIR_CYCLES = 8;
 async function requestPairing(socket) {
-  if (pairingRequested) return;
+  if (pairingRequested || socket !== activeSocket) return;
   try {
     const code = await socket.requestPairingCode(config.whatsappBotNumber);
     pairingRequested = true;
@@ -257,6 +267,8 @@ async function start() {
     syncFullHistory: false
   });
   runtime.sockets.add(socket);
+  activeSocket = socket;
+  pairingAttempts = 0;
 
   // Not linked yet → number-driven pairing code (unless QR mode is forced).
   if (config.whatsappUsePairingCode && config.whatsappBotNumber && !state.creds.registered) {
@@ -269,6 +281,7 @@ async function start() {
     if (qr && (!config.whatsappUsePairingCode || !pairingRequested)) await writeQr(qr);
     if (connection === "open") {
       logger.info("WhatsApp connected; UiPath is the conversation runtime");
+      repairCycles = 0;
       await fs.rm(config.qrPath, { force: true });
       currentSocket = socket;
       scheduler.start();
@@ -276,16 +289,40 @@ async function start() {
     }
     if (connection === "close") {
       runtime.sockets.delete(socket);
+      if (socket === activeSocket) activeSocket = null;
       const status = lastDisconnect?.error?.output?.statusCode;
-      if (status === DisconnectReason.loggedOut) {
-        logger.warn("WhatsApp logged out (unlinked/device removed) — clearing session and re-pairing");
-        pairingRequested = false;
-        await fs.rm(config.authDir, { recursive: true, force: true }).catch(() => {});
-        setTimeout(() => start().catch((error) => logger.error({ error }, "Re-pair restart failed")), 1500);
+      const loggedOut = status === DisconnectReason.loggedOut;
+
+      // A registered (working) session hit a transient drop — timeout/restart-required/conflict.
+      // Reconnect promptly; this is not a pairing failure, so it doesn't count toward the cap.
+      if (!loggedOut && state.creds.registered) {
+        logger.warn({ status }, "WhatsApp disconnected; reconnecting");
+        setTimeout(() => start().catch((error) => logger.error({ error }, "Reconnect failed")), 1500);
         return;
       }
-      logger.warn({ status }, "WhatsApp disconnected; reconnecting");
-      setTimeout(() => start().catch((error) => logger.error({ error }, "Reconnect failed")), 1500);
+
+      // Otherwise we must (re)pair: WhatsApp logged us out (dead session → wipe it), or a pairing
+      // attempt lapsed before anyone entered the code (re-issue one). Bound the unattended cycles
+      // with backoff so we never spam WhatsApp with codes nobody is entering.
+      repairCycles += 1;
+      if (repairCycles > MAX_REPAIR_CYCLES) {
+        logger.error(
+          { repairCycles, status },
+          `WhatsApp pairing failed ${MAX_REPAIR_CYCLES}× with no code entered — stopping to avoid spamming WhatsApp. ` +
+          `Link +${config.whatsappBotNumber} on the phone (Linked Devices → Link a device → "Link with phone number instead"), then restart the gateway.`
+        );
+        return;
+      }
+      const delay = Math.min(5000 * 2 ** (repairCycles - 1), 300000);
+      logger.warn(
+        { repairCycles, status, delayMs: delay },
+        loggedOut
+          ? "WhatsApp logged out (unlinked/device removed) — clearing session and re-pairing"
+          : "WhatsApp pairing lapsed before the code was entered — re-issuing a code"
+      );
+      pairingRequested = false; // allow the next start() to issue a fresh code
+      if (loggedOut) await fs.rm(config.authDir, { recursive: true, force: true }).catch(() => {});
+      setTimeout(() => start().catch((error) => logger.error({ error }, "Re-pair restart failed")), delay);
     }
   });
 

@@ -74,6 +74,8 @@ export function loadConfig() {
     googleApiKey: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "",
     transcribeModel: process.env.GEMINI_TRANSCRIBE_MODEL || process.env.GEMINI_MODEL || "gemini-3.1-pro-preview",
     mediaAnalysisTimeoutMs: Number(process.env.MEDIA_ANALYSIS_TIMEOUT_MS || 90000),
+    audioAnalysisTimeoutMs: Number(process.env.AUDIO_ANALYSIS_TIMEOUT_MS || process.env.MEDIA_ANALYSIS_TIMEOUT_MS || 180000),
+    mediaAnalysisRetries: Number(process.env.MEDIA_ANALYSIS_RETRIES || 1),
 
     authServerUrl: process.env.AUTH_SERVER_URL || "https://swims.ownaradio.com",
     authServerBind: process.env.AUTH_SERVER_BIND || "127.0.0.1",
