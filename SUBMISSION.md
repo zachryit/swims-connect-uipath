@@ -69,7 +69,7 @@ Hi
 Then:
 
 ```text
-I want to report a sample case. A 12-year-old child in Tarkwa is missing school and working at a mining site.
+I want to report a case. A 12-year-old child in Tarkwa is missing school and working at a mining site.
 ```
 
 If showing the full flow, answer the consent question with:
@@ -84,16 +84,14 @@ yes
 > The gateway receives the message, sends it into the UiPath-hosted coded agent, and the agent asks a
 > safeguarding question before filing: may the reporter be contacted for follow-up? If the reporter says
 > no, the report can remain anonymous. If they say yes, the contact path can be preserved. The important
-> part is that the agent does not invent a case number. It writes to Primero and returns the real SWIMS
+> part is that the agent does not invent a case number. It writes to Primero and returns the  SWIMS
 > Case ID from the backend.
 
 **Optional screen if voice-note is stable:** Send a short English voice note describing the same case.
 
 **Optional voiceover add-on:**
 
-> The same intake path can handle voice notes and images. Media is analysed before it reaches the
-> agent, and if transcription fails the system asks for a clearer or typed report instead of crashing
-> the conversation.
+> The same intake path can handle voice notes and images. 
 
 ### 1:45–2:20 — Show the case in Primero/SWIMS
 
@@ -130,7 +128,7 @@ Show my cases.
 or:
 
 ```text
-Run my supervisor daily report.
+Run my daily report.
 ```
 
 **Voiceover:**
@@ -143,7 +141,7 @@ Run my supervisor daily report.
 
 ### 3:10–3:45 — Draft-before-save casework assistance
 
-**Screen:** Ask a worker casework request using a real Case ID:
+**Screen:** Ask a worker casework request using a Case ID:
 
 ```text
 Show case <CASE_ID> and draft an assessment for my review.
