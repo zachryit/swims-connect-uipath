@@ -1,9 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { extractInbound, normalizeSender } from "../src/message.js";
 
 test("normalizes a Baileys JID to E.164", () => {
   assert.equal(normalizeSender("233256590242@s.whatsapp.net"), "+233256590242");
+});
+
+test("resolves WhatsApp LID senders to the mapped phone number", () => {
+  const authDir = fs.mkdtempSync(path.join(os.tmpdir(), "swims-lid-"));
+  fs.writeFileSync(path.join(authDir, "lid-mapping-15530652135456_reverse.json"), JSON.stringify("233243270000"));
+  try {
+    assert.equal(normalizeSender("15530652135456@lid", authDir), "+233243270000");
+    const turn = extractInbound({
+      key: { remoteJid: "15530652135456@lid", id: "abc" },
+      message: { conversation: "Hi" }
+    }, authDir);
+    assert.equal(turn.sender, "+233243270000");
+  } finally {
+    fs.rmSync(authDir, { recursive: true, force: true });
+  }
 });
 
 test("extracts a text turn without leaking Baileys objects", () => {

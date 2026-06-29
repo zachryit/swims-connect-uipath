@@ -20,13 +20,20 @@ import { MaestroClient } from "./maestro-client.js";
 const NONE = /^\s*none\b/i; // agent replies exactly "NONE" when nothing is overdue
 const CLOSED = /^\s*closed\b/i; // agent replies exactly "CLOSED" when Primero says the case is closed
 
-function checkPrompt(swimsCaseId) {
+function checkPrompt(swimsCaseId, now = new Date()) {
+  const today = now.toISOString().slice(0, 10);
   return (
-    `[Automated overdue check — not a user message] For SWIMS case ${swimsCaseId}, check Primero now: ` +
-    `are any workflow steps overdue (assessment, case plan, service referral, follow-up, or closure ` +
-    `review past their due date and not yet completed)? If yes, reply with a brief WhatsApp heads-up ` +
-    `addressed to the case owner that names the case ID and ONLY the overdue step(s). If the case ` +
-    `is closed, reply with exactly: CLOSED. If it is open and nothing is overdue, reply with exactly: NONE`
+    `[Automated Maestro overdue check — not a user message]\n` +
+    `Today's date is ${today}.\n` +
+    `You MUST call get_case for SWIMS case ${swimsCaseId}, inspect its workflow, status, ` +
+    `assessment_due_date, case-plan fields, service referrals, follow-ups, and closure-review fields, ` +
+    `then compare due dates with today's date.\n` +
+    `If a due date is before today and the matching step is not completed, reply with a brief WhatsApp ` +
+    `heads-up addressed to the case owner that names the display Case ID and ONLY the overdue step(s). ` +
+    `For example: "Heads-up: the assessment for case <id> is overdue."\n` +
+    `If the case is closed, reply exactly: CLOSED.\n` +
+    `Only reply NONE after checking the case and confirming no assessment, case-plan, service referral, ` +
+    `follow-up, or closure-review date is overdue.`
   );
 }
 
@@ -135,7 +142,7 @@ export class CaseMonitor {
         m.lastCheckAt = now.toISOString();
 
         // 4. Drive the agent to confirm against live Primero, then nudge the owner if overdue.
-        const reply = await this.deps.generate(m.caseOwner, checkPrompt(m.swimsCaseId));
+        const reply = await this.deps.generate(m.caseOwner, checkPrompt(m.swimsCaseId, now));
         if (reply && CLOSED.test(reply)) {
           if (m.instanceId) await this.maestro.cancelInstance(m.instanceId, this.config.maestroFolderKey);
           this.logger.info(

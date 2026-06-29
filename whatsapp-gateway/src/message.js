@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 function unwrap(message) {
   return message?.ephemeralMessage?.message
     || message?.viewOnceMessage?.message
@@ -5,12 +8,32 @@ function unwrap(message) {
     || message;
 }
 
-export function normalizeSender(jid) {
-  const digits = String(jid || "").split("@")[0].replace(/\D/g, "");
-  return digits ? `+${digits}` : "";
+function digits(value) {
+  return String(value || "").replace(/\D/g, "");
 }
 
-export function extractInbound(message) {
+function resolveLidToPhone(lidUser, authDir) {
+  if (!lidUser || !authDir) return "";
+  const file = path.join(authDir, `lid-mapping-${lidUser}_reverse.json`);
+  try {
+    return digits(JSON.parse(fs.readFileSync(file, "utf8")));
+  } catch {
+    return "";
+  }
+}
+
+export function normalizeSender(jid, authDir = "") {
+  const value = String(jid || "");
+  const [user, server = ""] = value.split("@");
+  if (server === "lid") {
+    const mapped = resolveLidToPhone(digits(user), authDir);
+    if (mapped) return `+${mapped}`;
+  }
+  const phone = digits(String(jid || "").split("@")[0]);
+  return phone ? `+${phone}` : "";
+}
+
+export function extractInbound(message, authDir = "") {
   const body = unwrap(message?.message);
   const text = body?.conversation
     || body?.extendedTextMessage?.text
@@ -28,7 +51,7 @@ export function extractInbound(message) {
 
   return {
     channel: "whatsapp",
-    sender: normalizeSender(message?.key?.remoteJid),
+    sender: normalizeSender(message?.key?.remoteJid, authDir),
     messageId: String(message?.key?.id || ""),
     text: String(text).trim(),
     messageType,

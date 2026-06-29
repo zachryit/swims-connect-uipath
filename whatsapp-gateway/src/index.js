@@ -331,7 +331,7 @@ async function start() {
     if (type !== "notify") return;
     for (const message of messages) {
       if (message.key?.fromMe || !message.message) continue;
-      const inbound = extractInbound(message);
+      const inbound = extractInbound(message, config.authDir);
       if (!inbound.sender || !inbound.messageId || handled.has(inbound.messageId)) continue;
       logger.info({ sender: inbound.sender, messageId: inbound.messageId, messageType: inbound.messageType }, "WhatsApp inbound message accepted");
       handled.add(inbound.messageId);
